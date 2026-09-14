@@ -71,7 +71,10 @@ function candidate(overrides: Partial<Candidate> = {}): Candidate {
  * suppress its own fixtures.
  */
 async function cleanupDiscovery() {
-  await db.delete(discoveryResults).where(like(discoveryResults.addressLine1, `%Sample Parkway ${RUN}%`));
+  // Match on the run nonce alone, not on a street-suffix spelling: one fixture
+  // deliberately rewrites "Parkway" to "Pkwy." to exercise address normalisation,
+  // and a pattern containing the suffix would leave that row behind.
+  await db.delete(discoveryResults).where(like(discoveryResults.addressLine1, `%${RUN}%`));
   await db.delete(discoverySuppressions).where(like(discoverySuppressions.keyValue, `%${RUN}%`));
 }
 
