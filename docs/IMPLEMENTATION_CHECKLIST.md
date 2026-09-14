@@ -80,16 +80,23 @@ Consequences:
 
 ## Phase 3 — Discovery
 
-- [ ] Anthropic client, server-only key, configurable model
-- [ ] Structured + validated extraction schema
-- [ ] Corridor-scoped web search with coverage reporting
-- [ ] Background worker (claim / heartbeat / retry / cancel / concurrency)
-- [ ] Scan states: queued / running / completed / partial / cancelled / failed
-- [ ] Deduplication + suppression of already-reviewed candidates
-- [ ] Discovery inbox: review, correct, approve, link, reject, needs-research
-- [ ] Proposed-change review for existing properties (never silent overwrite)
-- [ ] Manual "Add listing URL" and "Upload flyer/OM" through the same pipeline
-- [ ] Budget ceiling, per-scan limits, recorded usage
+Model/tool identifiers verified against current Anthropic documentation during
+implementation (not from memory): **`claude-sonnet-5`** is the current Sonnet-family
+model, and the current web search tool is **`web_search_20260209`** (the basic
+`web_search_20250305` variant is selected automatically for older models).
+
+- [x] Anthropic client, server-only key, configurable model
+- [x] Structured + validated extraction schema (Zod, every field nullable, field-level sources)
+- [x] Two-phase design: research with web search, then schema-validated extraction with no tools
+- [x] Corridor-scoped web search with honest coverage reporting
+- [x] Prompt-injection defence: retrieved content is delimited and treated as data
+- [x] Background worker (claim / heartbeat / retry / backoff / cancel / concurrency / graceful shutdown)
+- [x] Scan states: queued / running / completed / partial / cancelled / failed
+- [x] Deduplication (normalised URL + address hash) + permanent suppression
+- [x] Proposed-change review for existing properties (never silent overwrite)
+- [x] Budget ceiling re-checked between corridors, per-scan search limits, recorded usage
+- [ ] Discovery inbox UI (service + tests done; screen pending)
+- [ ] Manual "Add listing URL" and "Upload flyer/OM" UI (extraction functions done)
 
 ## Phase 4 — Production hardening
 
@@ -104,7 +111,7 @@ Consequences:
 
 ## Test coverage targets (from the brief)
 
-**67 tests passing** (`npm test`) across `tests/geometry.test.ts` and `tests/persistence.test.ts`.
+**93 tests passing** (`npm test`) across `tests/geometry.test.ts` and `tests/persistence.test.ts`.
 
 - [x] Corridor and parcel geometry validation/persistence — unit level (25 tests)
 - [x] Parcel and corridor persistence — database level
@@ -119,6 +126,10 @@ Consequences:
 - [x] Access control helpers and concurrent-edit protection (version conflicts)
 - [x] Import validation and duplicate handling (row errors, in-file and existing duplicates, re-import does not double data, explicit update)
 - [x] CSV round-trip: negative coordinates survive, formula injection escaped
-- [ ] Repeated scans do not create duplicates
-- [ ] Reviewed data not overwritten by AI
-- [ ] API keys remain server-side (assertion test)
+- [x] Repeated scans do not create duplicates (same URL, and same address across two sources)
+- [x] Rejected candidates never resurface; "needs research" deliberately stays in play
+- [x] Reviewed data not overwritten by AI (verified fields, call notes and version untouched)
+- [x] Empty fields are still offered as proposals; price moves surface as proposals
+- [x] Geographic relevance: missing coordinates yield 'unknown' and stay in review
+- [x] Name similarity alone never merges two properties
+- [x] API keys remain server-side (status surfaces, no NEXT_PUBLIC_ leak, scan refuses without a key)

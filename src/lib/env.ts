@@ -71,7 +71,7 @@ export const env = {
 
   ai: {
     apiKey: str('ANTHROPIC_API_KEY'),
-    model: str('ANTHROPIC_MODEL', 'claude-sonnet-4-5'),
+    model: str('ANTHROPIC_MODEL', 'claude-sonnet-5'),
     maxWebSearchesPerScan: num('AI_MAX_WEB_SEARCHES_PER_SCAN', 12),
     maxOutputTokens: num('AI_MAX_OUTPUT_TOKENS', 8000),
     monthlyBudgetUsd: num('AI_MONTHLY_BUDGET_USD', 25),

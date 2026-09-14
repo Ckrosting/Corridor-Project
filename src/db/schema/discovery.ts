@@ -115,7 +115,8 @@ export const discoveryResults = pgTable(
     fieldSources: jsonb('field_sources').$type<Record<string, unknown>>(),
     /** Fields the extractor could not support with evidence - shown as "verify". */
     needsVerification: jsonb('needs_verification').$type<string[]>(),
-    sources: jsonb('sources').$type<Array<{ url: string; title?: string; sourceName?: string }>>(),
+    /** Nullable inner fields: an extracted source often has a URL but no title. */
+    sources: jsonb('sources').$type<Array<{ url: string; title?: string | null; sourceName?: string | null }>>(),
     evidenceExcerpt: text('evidence_excerpt'),
 
     /* ---- Geographic relevance against the saved corridor boundary ---- */

@@ -60,10 +60,11 @@ const DEFAULT_SETTINGS: Array<{ key: string; value: unknown }> = [
   { key: 'corridor_edge_buffer_meters', value: 500 },
   { key: 'default_corridor_radius_meters', value: 1609 },
   {
-    // Estimated USD per million tokens, used only to report approximate spend.
-    // Verify against current Anthropic pricing; these are conservative placeholders.
+    // Estimated USD per million tokens, used only to report APPROXIMATE spend.
+    // Matches Claude Sonnet 5 list pricing at the time of writing; admins can
+    // change these in Settings when pricing or the configured model changes.
     key: 'ai_cost_rates',
-    value: { inputPerMTok: 3, outputPerMTok: 15, webSearchPerThousand: 10 },
+    value: { inputPerMTok: 2, outputPerMTok: 10, webSearchPerThousand: 10 },
   },
 ];
 
