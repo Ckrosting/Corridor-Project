@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { requirePageUser } from '@/lib/auth/guards';
 import { getCorridorWorkspace } from '@/lib/services/workspace';
 import { NotFoundError } from '@/lib/errors';
+import { isAiConfigured } from '@/lib/ai/client';
 import { CorridorWorkspace } from '@/components/workspace/corridor-workspace';
 
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,7 @@ export default async function CorridorPage({ params }: { params: Promise<{ id: s
         propertyTypes={w.propertyTypes}
         properties={w.properties}
         parcels={w.parcels}
+        aiConfigured={isAiConfigured()}
       />
     );
   } catch (err) {

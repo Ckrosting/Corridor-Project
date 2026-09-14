@@ -15,6 +15,7 @@ import {
   ApproximateBoundaryNote, EmptyState, SampleBadge, Spinner, StatusChip,
 } from '@/components/ui/primitives';
 import { PropertyPanel } from './property-panel';
+import { DiscoveryAction } from './discovery-action';
 
 export interface WorkspaceProperty {
   id: string;
@@ -61,6 +62,8 @@ interface Props {
   propertyTypes: string[];
   properties: WorkspaceProperty[];
   parcels: Array<{ id: string; propertyId: string; geometry: AreaGeometry | null; label: string | null }>;
+  /** Presence flag only — the API key itself never reaches the browser. */
+  aiConfigured: boolean;
 }
 
 const VIEW_STORAGE_KEY = 'hc.mapView';
@@ -74,7 +77,8 @@ const VIEW_STORAGE_KEY = 'hc.mapView';
  * user's place.
  */
 export function CorridorWorkspace({
-  corridor, market, siblingCorridors, anchors, statuses, tags, propertyTypes, properties, parcels,
+  corridor, market, siblingCorridors, anchors, statuses, tags, propertyTypes, properties,
+  parcels, aiConfigured,
 }: Props) {
   const router = useRouter();
   const mapRef = useRef<MapViewHandle>(null);
@@ -345,6 +349,13 @@ export function CorridorWorkspace({
           >
             <Squircle size={13} /> {drawMode === 'parcel' ? 'Cancel draw' : 'Draw parcel'}
           </button>
+
+          <DiscoveryAction
+            corridorId={corridor.id}
+            marketId={market.id}
+            corridorName={corridor.name}
+            aiConfigured={aiConfigured}
+          />
 
           <Link href={`/properties/new?corridorId=${corridor.id}&marketId=${market.id}`} className="btn-primary btn-sm">
             <Plus size={13} /> Property

@@ -1,0 +1,254 @@
+'use client';
+
+import { useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { Link2, Search, Upload, X } from 'lucide-react';
+import { Spinner } from '@/components/ui/primitives';
+
+/**
+ * "Find New Listings" plus the two manual routes into the same review pipeline.
+ *
+ * A scan is queued and runs in the worker; a submitted URL or uploaded document
+ * is extracted inline because the user is waiting. All three land in the
+ * discovery inbox for review — none writes a property record directly.
+ */
+export function DiscoveryAction({
+  corridorId, marketId, corridorName, aiConfigured,
+}: {
+  corridorId: string;
+  marketId: string;
+  corridorName: string;
+  aiConfigured: boolean;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<'scan' | 'url' | 'file'>('scan');
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [notes, setNotes] = useState<string[]>([]);
+
+  async function startScan() {
+    setBusy(true);
+    setError(null);
+    setNotes([]);
+    try {
+      const res = await fetch('/api/scans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: 'corridor', corridorId }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; corridorCount?: number };
+      if (!res.ok) throw new Error(body.error ?? 'The scan could not be started.');
+
+      setMessage('Scan queued. It runs in the background — you can keep working, and results appear in the discovery inbox.');
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The scan could not be started.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitUrl() {
+    setBusy(true);
+    setError(null);
+    setNotes([]);
+    try {
+      const res = await fetch('/api/discovery/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, corridorId, marketId }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string; notes?: string[]; staged?: { created: number; duplicates: number; suppressed: number };
+      };
+      if (!res.ok) throw new Error(body.error ?? 'That URL could not be read.');
+
+      setNotes(body.notes ?? []);
+      setMessage(describe(body.staged));
+      setUrl('');
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'That URL could not be read.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitFile(file: File) {
+    setBusy(true);
+    setError(null);
+    setNotes([]);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('corridorId', corridorId);
+      form.append('marketId', marketId);
+
+      const res = await fetch('/api/discovery/submit', { method: 'POST', body: form });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string; notes?: string[]; staged?: { created: number; duplicates: number; suppressed: number };
+      };
+      if (!res.ok) throw new Error(body.error ?? 'That document could not be read.');
+
+      setNotes(body.notes ?? []);
+      setMessage(describe(body.staged));
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'That document could not be read.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function describe(staged?: { created: number; duplicates: number; suppressed: number }): string {
+    if (!staged) return 'Done.';
+    if (staged.created > 0) {
+      return `${staged.created} candidate${staged.created === 1 ? '' : 's'} added to the discovery inbox for review.`;
+    }
+    if (staged.duplicates > 0) return 'That listing is already in the inbox — its last-seen date was updated.';
+    if (staged.suppressed > 0) return 'That listing was already reviewed previously, so it was not added again.';
+    return 'Nothing could be extracted from that source.';
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="btn-secondary btn-sm" onClick={() => setOpen(true)}>
+        <Search size={13} /> Find listings
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-ink-900/40 p-6" role="dialog" aria-modal="true">
+      <div className="card w-full max-w-lg">
+        <div className="card-header">
+          <h2 className="card-title flex items-center gap-1.5">
+            <Search size={15} /> Find listings in {corridorName}
+          </h2>
+          <button
+            type="button" className="btn-ghost btn-sm" aria-label="Close"
+            onClick={() => { setOpen(false); setMessage(null); setError(null); setNotes([]); }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="flex gap-0.5 border-b border-ink-200 px-3">
+          {([
+            ['scan', 'Search the web'],
+            ['url', 'Add a listing URL'],
+            ['file', 'Upload a flyer / OM'],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key} type="button" onClick={() => { setTab(key); setError(null); setMessage(null); }}
+              className={`-mb-px border-b-2 px-2.5 py-2 text-xs font-medium transition-colors ${
+                tab === key ? 'border-accent-600 text-accent-700' : 'border-transparent text-ink-500 hover:text-ink-800'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="space-y-3 p-4">
+          {!aiConfigured && (
+            <div className="banner-warn">
+              <span>
+                <strong>Discovery is not configured.</strong> An administrator needs to set
+                {' '}<code className="rounded bg-amber-100 px-1">ANTHROPIC_API_KEY</code> on the
+                server. You can still add properties by hand from the map.
+              </span>
+            </div>
+          )}
+
+          {tab === 'scan' && (
+            <>
+              <p className="text-xs leading-relaxed text-ink-600">
+                Searches publicly accessible listing sources for any property type offered for sale
+                in this corridor, with no price restriction. Results are staged in the discovery
+                inbox for your review — nothing is added to the map automatically.
+              </p>
+              <div className="banner-info">
+                <span>
+                  Sources that are blocked, paywalled or behind a login are reported as coverage
+                  limitations rather than skipped silently. This is not a complete market survey.
+                </span>
+              </div>
+              <button type="button" className="btn-primary w-full" onClick={() => void startScan()} disabled={busy || !aiConfigured}>
+                {busy && <Spinner />} Start scan
+              </button>
+            </>
+          )}
+
+          {tab === 'url' && (
+            <>
+              <p className="text-xs leading-relaxed text-ink-600">
+                Paste a listing page URL. It is read and extracted through the same review pipeline
+                as a scan.
+              </p>
+              <input
+                className="input" placeholder="https://…" value={url}
+                onChange={(e) => setUrl(e.target.value)} disabled={busy}
+              />
+              <button
+                type="button" className="btn-primary w-full"
+                onClick={() => void submitUrl()} disabled={busy || !url.trim() || !aiConfigured}
+              >
+                {busy ? <Spinner /> : <Link2 size={13} />} Extract from URL
+              </button>
+            </>
+          )}
+
+          {tab === 'file' && (
+            <>
+              <p className="text-xs leading-relaxed text-ink-600">
+                Upload a broker flyer or offering memorandum as a PDF or image. Word and Excel files
+                need exporting to PDF first.
+              </p>
+              <label className="flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 border-dashed border-ink-300 px-4 py-6 text-center hover:border-accent-500 hover:bg-accent-50">
+                <Upload size={20} className="text-ink-400" />
+                <span className="text-xs font-medium text-ink-800">Choose a PDF or image</span>
+                <input
+                  type="file" accept="application/pdf,image/*" className="hidden" disabled={busy || !aiConfigured}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void submitFile(f); e.target.value = ''; }}
+                />
+              </label>
+              {busy && <div className="banner-info"><Spinner /> Reading the document…</div>}
+            </>
+          )}
+
+          {message && (
+            <div className="banner-ok">
+              <span>
+                {message}{' '}
+                <Link href="/discovery" className="underline underline-offset-2">Open the inbox</Link>
+              </span>
+            </div>
+          )}
+
+          {notes.length > 0 && (
+            <div className="banner-warn">
+              <span>
+                <strong>Coverage notes:</strong>
+                <ul className="mt-1 space-y-0.5">
+                  {notes.slice(0, 6).map((n, i) => <li key={i}>• {n}</li>)}
+                </ul>
+              </span>
+            </div>
+          )}
+
+          {error && <div className="banner-error" role="alert">{error}</div>}
+
+          <p className="field-hint">
+            A CoStar subscription does not grant automated access, so CoStar is not searched. Export
+            from CoStar and use the import tools, or paste an individual public listing URL here.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
