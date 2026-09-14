@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# local postgres data (embedded-postgres)
+/.pgdata/
+/.pgcache/
+
+# local uploads (dev storage driver)
+/storage/
+/var/
+
+# env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+
+# misc
+.DS_Store
+*.pem
+.vercel
+coverage/
+/backups/
+*.tsbuildinfo

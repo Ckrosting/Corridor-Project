@@ -1,0 +1,223 @@
+@import 'tailwindcss';
+@import 'leaflet/dist/leaflet.css';
+@import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
+
+/**
+ * Hull Corridor visual language.
+ *
+ * Desktop-first acquisitions tooling: restrained neutral palette, one accent, high
+ * information density, and status colour that is always paired with a text label
+ * so it is never the only carrier of meaning.
+ */
+
+@theme {
+  --color-ink-50: #f8fafc;
+  --color-ink-100: #f1f5f9;
+  --color-ink-200: #e2e8f0;
+  --color-ink-300: #cbd5e1;
+  --color-ink-400: #94a3b8;
+  --color-ink-500: #64748b;
+  --color-ink-600: #475569;
+  --color-ink-700: #334155;
+  --color-ink-800: #1e293b;
+  --color-ink-900: #0f172a;
+  --color-ink-950: #020617;
+
+  --color-accent-50: #eff6ff;
+  --color-accent-100: #dbeafe;
+  --color-accent-200: #bfdbfe;
+  --color-accent-500: #3b82f6;
+  --color-accent-600: #2563eb;
+  --color-accent-700: #1d4ed8;
+
+  --color-positive: #15803d;
+  --color-positive-bg: #f0fdf4;
+  --color-caution: #b45309;
+  --color-caution-bg: #fffbeb;
+  --color-danger: #b91c1c;
+  --color-danger-bg: #fef2f2;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', Menlo, monospace;
+}
+
+html, body { height: 100%; }
+
+body {
+  background: var(--color-ink-100);
+  color: var(--color-ink-900);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+* { border-color: var(--color-ink-200); }
+
+/* Tabular figures keep money columns aligned in dense tables. */
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- Controls */
+
+@layer components {
+  /*
+   * Tailwind v4 note: `@apply` can only reference real utilities, not other
+   * custom component classes. So the shared button/banner/chip bases are spelled
+   * out in each variant rather than composed via `@apply btn`.
+   */
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5
+           text-sm font-medium whitespace-nowrap transition-colors select-none
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5
+           text-sm font-medium whitespace-nowrap transition-colors select-none
+           disabled:cursor-not-allowed disabled:opacity-50
+           border-accent-600 bg-accent-600 text-white
+           hover:border-accent-700 hover:bg-accent-700;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5
+           text-sm font-medium whitespace-nowrap transition-colors select-none
+           disabled:cursor-not-allowed disabled:opacity-50
+           border-ink-300 bg-white text-ink-700 hover:bg-ink-50 hover:text-ink-900;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5
+           text-sm font-medium whitespace-nowrap transition-colors select-none
+           disabled:cursor-not-allowed disabled:opacity-50
+           border-transparent bg-transparent text-ink-600 hover:bg-ink-100 hover:text-ink-900;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5
+           text-sm font-medium whitespace-nowrap transition-colors select-none
+           disabled:cursor-not-allowed disabled:opacity-50
+           border-red-600 bg-red-600 text-white hover:bg-red-700;
+  }
+  .btn-sm { @apply px-2 py-1 text-xs; }
+
+  .input {
+    @apply w-full rounded-md border border-ink-300 bg-white px-2.5 py-1.5 text-sm text-ink-900
+           placeholder:text-ink-400
+           focus:border-accent-500 focus:ring-2 focus:ring-accent-100 focus:outline-none
+           disabled:bg-ink-100 disabled:text-ink-500;
+  }
+  textarea.input { @apply leading-relaxed; }
+
+  .label { @apply mb-1 block text-xs font-medium tracking-wide text-ink-600; }
+  .field-hint { @apply mt-1 text-xs text-ink-500; }
+  .field-error { @apply mt-1 text-xs font-medium text-red-700; }
+
+  .card { @apply rounded-lg border border-ink-200 bg-white shadow-sm; }
+  .card-header {
+    @apply flex items-center justify-between gap-3 border-b border-ink-200 px-4 py-2.5;
+  }
+  .card-title { @apply text-sm font-semibold text-ink-900; }
+
+  /* Status chips always carry a text label, never colour alone. */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5
+           text-xs font-medium whitespace-nowrap;
+  }
+  .chip-dot { @apply h-1.5 w-1.5 shrink-0 rounded-full; }
+
+  .table-dense { @apply w-full border-collapse text-sm; }
+  .table-dense thead th {
+    @apply sticky top-0 z-10 border-b border-ink-200 bg-ink-50 px-3 py-2 text-left
+           text-xs font-semibold tracking-wide text-ink-600;
+  }
+  .table-dense tbody td { @apply border-b border-ink-100 px-3 py-2 align-middle; }
+  .table-dense tbody tr { @apply cursor-pointer transition-colors hover:bg-accent-50; }
+  .table-dense tbody tr[data-selected='true'] { @apply bg-accent-50; }
+
+  .stat-value { @apply text-2xl font-semibold tracking-tight text-ink-900; font-variant-numeric: tabular-nums; }
+  .stat-label { @apply text-xs font-medium text-ink-500; }
+
+  .empty-state { @apply flex flex-col items-center justify-center gap-2 px-6 py-10 text-center; }
+  .empty-title { @apply text-sm font-semibold text-ink-800; }
+  .empty-body { @apply max-w-sm text-xs leading-relaxed text-ink-500; }
+
+  .section-label { @apply text-[11px] font-semibold tracking-wider text-ink-500 uppercase; }
+
+  /* A field whose value is genuinely unknown, distinct from a real zero. */
+  .unknown { @apply text-ink-400; }
+
+  .banner { @apply flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-relaxed; }
+  .banner-info {
+    @apply flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-relaxed
+           border-accent-200 bg-accent-50 text-accent-700;
+  }
+  .banner-warn {
+    @apply flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-relaxed
+           border-amber-200 bg-amber-50 text-amber-800;
+  }
+  .banner-error {
+    @apply flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-relaxed
+           border-red-200 bg-red-50 text-red-800;
+  }
+  .banner-ok {
+    @apply flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-relaxed
+           border-green-200 bg-green-50 text-green-800;
+  }
+}
+
+/* ------------------------------------------------------------------- Leaflet */
+
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: var(--color-ink-200);
+}
+.leaflet-container a { color: var(--color-accent-600); }
+
+/* Keep Leaflet's own chrome below application panels and dropdowns. */
+.leaflet-pane { z-index: 1; }
+.leaflet-top, .leaflet-bottom { z-index: 500; }
+
+.leaflet-control-attribution {
+  font-size: 10px !important;
+  background: rgb(255 255 255 / 0.85) !important;
+}
+
+.leaflet-popup-content-wrapper { border-radius: 6px; }
+.leaflet-popup-content { margin: 8px 10px; font-size: 12px; }
+
+/* Property markers */
+.hc-marker {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%;
+  border-radius: 9999px;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  transition: transform 120ms ease;
+}
+.hc-marker-selected { transform: scale(1.45); z-index: 1000 !important; }
+.hc-marker-needs-outline { border-style: dashed; border-color: #fff; }
+
+.hc-anchor-marker {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%;
+  color: #fff; background: var(--color-ink-800);
+  border: 2px solid #fff; border-radius: 4px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+}
+
+/* Geoman toolbar restyled to match the app rather than its default look. */
+.leaflet-pm-toolbar .leaflet-pm-actions-container a,
+.leaflet-pm-toolbar .button-container a {
+  border-radius: 4px !important;
+}
+
+/* --------------------------------------------------------------- Scrollbars */
+
+.scroll-thin { scrollbar-width: thin; scrollbar-color: var(--color-ink-300) transparent; }
+.scroll-thin::-webkit-scrollbar { width: 9px; height: 9px; }
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-ink-300); border-radius: 9999px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover { background-color: var(--color-ink-400); background-clip: content-box; }
+
+@media print {
+  .no-print { display: none !important; }
+}
