@@ -1,13 +1,15 @@
 # Hull Corridor — Implementation Checklist
 
-Living document. Update as work lands. `[x]` = built **and** verified, `[~]` = partially
-done, `[ ]` = not started.
+Living document. `[x]` = built **and** verified, `[~]` = partial, `[ ]` = not started.
+
+**Current state:** Phases 1–4 implemented. 99 tests passing, typecheck clean,
+production build succeeds. Nothing deployed, no paid service provisioned.
 
 ---
 
 ## Environment facts (verified 2026-09-14)
 
-These constrain the architecture and are worth re-reading before changing infrastructure.
+Re-read these before changing anything infrastructural.
 
 | Fact | Value |
 |---|---|
@@ -18,118 +20,143 @@ These constrain the architecture and are worth re-reading before changing infras
 | Project location | OneDrive-synced folder |
 
 Consequences:
+
 - Local Postgres runs from the `embedded-postgres` npm binaries (`npm run db:up`),
   **not** Docker Compose. Real PostgreSQL 17.10, same engine as Railway.
-- The Postgres data directory lives at `%LOCALAPPDATA%\hull-corridor\pgdata`,
-  deliberately **outside** OneDrive — OneDrive sync corrupts live database files.
-- No `pg_dump`/`psql` binaries ship with the embedded package, so backup/restore is
-  implemented as a portable logical dump in TypeScript instead.
-- npm 11 gates install scripts. `allowScripts` in `package.json` records the
-  approvals; a fresh clone may need `npm approve-scripts --allow-scripts-pending`.
+- The data directory lives at `%LOCALAPPDATA%\hull-corridor\pgdata`, deliberately
+  **outside** OneDrive — sync corrupts live database files.
+- No `pg_dump`/`psql` ships with the embedded package, so backup/restore is a
+  portable logical dump written in TypeScript.
+- npm 11 gates install scripts; `allowScripts` in `package.json` records approvals.
+- **TypeScript is pinned to `^6`.** TS 7's native compiler removes the JS compiler
+  API that Next.js 15 requires; installing it breaks `next.config` loading with a
+  confusing error.
 
 ---
 
 ## Phase 0 — Foundation
 
-- [x] Git repository initialised
-- [x] `package.json`, TypeScript, Next.js 15, React 19 configured
-- [x] Local PostgreSQL 17.10 without Docker or admin (`db:up`/`db:down`/`db:status`/`db:nuke`)
-- [x] Drizzle ORM + drizzle-kit migrations wired
-- [x] Full schema: 33 tables, 16 enums, initial migration applied
-- [x] `.env.example` with no secrets; `.env` generated locally
-- [x] Vitest configured and running
-- [x] Geometry library (validate / bbox / point-in-polygon / area / circle / relevance) — **25 tests passing**
+- [x] Git repository, TypeScript, Next.js 15, React 19
+- [x] Local PostgreSQL 17.10 without Docker or admin rights
+- [x] Drizzle ORM + drizzle-kit migrations
+- [x] Full schema: 34 tables, 16 enums
+- [x] `.env.example` with no secrets; `npm run setup` one-shot bootstrap
+- [x] Vitest configured
+- [x] Geometry library — 25 tests
 
 ## Phase 1 — Local foundation
 
-- [x] Environment config module with typed validation and status reporting
-- [x] Auth: Auth.js v5 credentials, bcrypt, admin/member roles
-- [x] Dev-only sign-in shortcut, hard-disabled when `NODE_ENV=production`
-- [x] Server-side authorization helpers (`requireUser`, `requireAdmin`)
-- [x] Optimistic-concurrency helper (version tokens) + audit log writer
-- [x] Corridors: radius seed, custom draw, persistent boundaries
-- [x] Properties service with all specified fields
+- [x] Typed environment config with validation and safe status reporting
+- [x] Auth.js v5 credentials + bcrypt, admin/member roles
+- [x] Dev sign-in shortcut, structurally absent from production builds
+- [x] Server-side authorization guards (`requireUser`, `requireAdmin`)
+- [x] Optimistic concurrency (version tokens) + append-only audit log
+- [x] Markets, mall anchors, corridors (radius seed + freehand redraw)
+- [x] Properties with every specified field; unknown never stored as zero
 - [x] Parcels: multiple per property, optional geometry, persistent edits
-- [x] Corridor membership: many-to-many, recomputed on geometry change
-- [x] Activity timeline / call logging (service + UI)
-- [x] Follow-up queues (overdue / today / upcoming / none scheduled) — service
-- [x] Leaflet map: basemaps, draw/edit tools, fit-to-bounds, preserved viewport
-- [x] Corridor workspace screen (map + table + side panel + filters)
-- [x] Portfolio dashboard
-- [x] Seed data: default statuses/stages + clearly-labelled sample records
-- [x] Markets + mall anchors CRUD screens (list, create, market map workspace)
-- [x] Property detail screen (full view, inline editor, conflict handling)
-- [x] Properties list screen with URL-backed filters
-- [x] Follow-ups screen (overdue / today / upcoming / unscheduled)
-- [x] Shared contacts screens (list + detail with cross-property call history)
+- [x] Corridor membership: many-to-many, recomputed, manual pins preserved
+- [x] Shared contacts + owner entities kept separate
+- [x] Activity timeline and fast call logging
+- [x] Follow-up queues (overdue / today / upcoming / unscheduled)
+- [x] Leaflet map: basemaps, draw/edit, filters, fit-to-bounds, preserved viewport
+- [x] Corridor workspace, market workspace, property detail, portfolio dashboard
+- [x] Properties list, contacts list/detail, follow-ups screen
+- [x] Seed: default statuses/stages + clearly-labelled sample data
 
-## Phase 2 — Pipeline, config, imports, collaboration
+## Phase 2 — Pipeline, configuration, imports, collaboration
 
-- [x] Opportunities: explicit promotion only, reason + date captured
-- [x] Transaction pipeline (table + board), removal/reopen with history
-- [x] Custom fields (text/number/date/checkbox/select) — rendered and editable
-- [x] Mall import service: column mapping, validation, duplicate detection, explicit commit
-- [x] CSV export with stable IDs + mall import template
-- [x] Concurrent-edit protection surfaced in the UI (conflict banner, no silent overwrite)
-- [ ] Import UI screen (service and tests done; screen pending)
-- [ ] XLSX import (CSV done)
-- [ ] Configurable statuses/stages admin UI, with safe reassignment
-- [ ] Tags management UI
-- [ ] Attachments upload UI (storage abstraction done)
-- [ ] Users admin screen
+- [x] Opportunities: explicit promotion only, reason + date + author captured
+- [x] Pipeline board and table; removal and reopening with full history
+- [x] Configurable statuses and stages, with enforced reassignment on archive
+- [x] Custom fields (text/number/date/checkbox/select), rendered and editable
+- [x] Tags
+- [x] Storage abstraction (local ↔ S3) + authenticated attachment upload/download
+- [x] Mall import template + CSV import: mapping, preview, validation, duplicates,
+      row-level errors, explicit commit
+- [x] CSV exports with stable IDs for reconciliation
+- [x] Users administration
+- [x] Concurrent-edit protection surfaced in the UI
+- [~] Property/contact **import** — validation pipeline exists and export is
+      complete, but there is no dedicated import screen yet
+- [ ] XLSX import (CSV only; Excel "Save As → CSV" documented in the UI)
+- [ ] Attachment drag-and-drop control on the property screen
 
 ## Phase 3 — Discovery
 
-Model/tool identifiers verified against current Anthropic documentation during
-implementation (not from memory): **`claude-sonnet-5`** is the current Sonnet-family
-model, and the current web search tool is **`web_search_20260209`** (the basic
+Model and tool identifiers verified against **current Anthropic documentation**
+during implementation: `claude-sonnet-5` is the current Sonnet-family model, and
+`web_search_20260209` the current web search tool (the basic
 `web_search_20250305` variant is selected automatically for older models).
 
-- [x] Anthropic client, server-only key, configurable model
-- [x] Structured + validated extraction schema (Zod, every field nullable, field-level sources)
-- [x] Two-phase design: research with web search, then schema-validated extraction with no tools
-- [x] Corridor-scoped web search with honest coverage reporting
-- [x] Prompt-injection defence: retrieved content is delimited and treated as data
-- [x] Background worker (claim / heartbeat / retry / backoff / cancel / concurrency / graceful shutdown)
+- [x] Anthropic client; key server-side only; model configurable without code change
+- [x] Structured, Zod-validated extraction with field-level sources
+- [x] Two-phase design: research with search, then extraction with no tools
+- [x] Prompt-injection defence — retrieved content delimited and treated as data
+- [x] Corridor-scoped search with honest coverage reporting
+- [x] Background worker: claim / heartbeat / retry / backoff / cancel / concurrency /
+      graceful shutdown
 - [x] Scan states: queued / running / completed / partial / cancelled / failed
-- [x] Deduplication (normalised URL + address hash) + permanent suppression
-- [x] Proposed-change review for existing properties (never silent overwrite)
-- [x] Budget ceiling re-checked between corridors, per-scan search limits, recorded usage
-- [ ] Discovery inbox UI (service + tests done; screen pending)
-- [ ] Manual "Add listing URL" and "Upload flyer/OM" UI (extraction functions done)
+- [x] Deduplication (normalised URL **and** address hash) + permanent suppression
+- [x] Discovery inbox: review, correct, approve, link, reject, needs-research
+- [x] Proposed-change review — never a silent overwrite
+- [x] Manual "add listing URL" and "upload flyer/OM" through the same pipeline
+- [x] Budget ceiling enforced at queue time **and** re-checked between corridors
+- [x] Recorded usage with clearly-labelled cost estimates
 
-## Phase 4 — Production hardening
+## Phase 4 — Production readiness
 
-- [ ] Health endpoint
-- [ ] Rate limiting on expensive endpoints
-- [ ] Backup/restore tooling (database + attachments)
-- [ ] Railway deployment documentation
-- [ ] Local → production data migration path
-- [ ] Known limitations documented
+- [x] Health endpoint (`/api/health`), safe for unauthenticated use
+- [x] Backup and restore covering **both** rows and attachments — round trip verified
+- [x] Documented local → production migration path
+- [x] Railway deployment documentation + `railway.json` / `railway.worker.json`
+- [x] Production build verified
+- [x] Known limitations documented honestly
+- [ ] Rate limiting on expensive endpoints (scans are already bounded by budget,
+      concurrency ceiling and the duplicate-scan guard)
+- [ ] `audit_log` retention/pruning policy
 
 ---
 
-## Test coverage targets (from the brief)
+## Test coverage
 
-**93 tests passing** (`npm test`) across `tests/geometry.test.ts` and `tests/persistence.test.ts`.
+**99 tests passing.** Detail in [TEST_RESULTS.md](TEST_RESULTS.md).
 
-- [x] Corridor and parcel geometry validation/persistence — unit level (25 tests)
-- [x] Parcel and corridor persistence — database level
-- [x] Multiple parcels on one property (including a parcel ID with no geometry yet)
+- [x] Corridor and parcel geometry validation (25 unit tests)
+- [x] Parcel and corridor persistence at the database level
+- [x] Multiple parcels on one property, including a parcel ID with no geometry
 - [x] One property in overlapping corridors without duplication
 - [x] Call history and follow-up persistence
 - [x] Call history survives outreach status changes
-- [x] Explicit opportunity promotion (reason, date, author recorded)
+- [x] Explicit opportunity promotion (reason, date, author)
 - [x] Routine outreach stays out of the pipeline
 - [x] Opportunity removal and reopening without losing history
-- [x] Unknown values stay NULL; a real zero is stored as zero
-- [x] Access control helpers and concurrent-edit protection (version conflicts)
-- [x] Import validation and duplicate handling (row errors, in-file and existing duplicates, re-import does not double data, explicit update)
-- [x] CSV round-trip: negative coordinates survive, formula injection escaped
-- [x] Repeated scans do not create duplicates (same URL, and same address across two sources)
-- [x] Rejected candidates never resurface; "needs research" deliberately stays in play
-- [x] Reviewed data not overwritten by AI (verified fields, call notes and version untouched)
-- [x] Empty fields are still offered as proposals; price moves surface as proposals
-- [x] Geographic relevance: missing coordinates yield 'unknown' and stay in review
+- [x] Unknown stays NULL; a real zero is stored as zero
+- [x] Import validation, row-level errors, duplicate detection, re-import safety
+- [x] CSV round trip: negative coordinates survive, formula injection escaped
+- [x] Repeated scans create no duplicates (same URL **and** cross-source address)
+- [x] Rejected candidates never resurface; "needs research" stays in play
+- [x] Reviewed data never overwritten by AI; call notes untouched
 - [x] Name similarity alone never merges two properties
-- [x] API keys remain server-side (status surfaces, no NEXT_PUBLIC_ leak, scan refuses without a key)
+- [x] Missing coordinates yield 'unknown' and stay in review
+- [x] API keys remain server-side
+- [x] Access control: 401 vs 403, member-by-default, dev bypass impossible in production
+- [x] Concurrent-edit protection
+
+---
+
+## If picking this up fresh
+
+1. `npm install && npm run setup`
+2. `npm run dev` and `npm run worker` in two terminals
+3. Read [ARCHITECTURE.md](ARCHITECTURE.md) for why things are shaped as they are
+4. Read [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) before assuming something is
+   missing by accident
+
+Highest-value next steps, in order:
+
+1. **Load the real mall spreadsheet** through Settings → Import & export. That
+   exercises the import path with real data and populates the markets.
+2. **Add an `ANTHROPIC_API_KEY`** and run one corridor scan. Expect prompt tuning;
+   the budget ceiling and per-scan search limit bound the cost of finding out.
+3. **Finish the attachment upload control** on the property screen.
+4. **Deploy to Railway** following [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md).

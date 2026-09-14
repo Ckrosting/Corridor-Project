@@ -13,7 +13,14 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 loadDotenv({ path: path.join(rootDir, '.env'), quiet: true });
 
 export default defineConfig({
-  resolve: { alias: { '@': path.resolve(rootDir, './src') } },
+  resolve: {
+    alias: {
+      '@': path.resolve(rootDir, './src'),
+      // The real `server-only` package throws outside Next's react-server graph,
+      // which would make the auth guards untestable. Production keeps the guard.
+      'server-only': path.resolve(rootDir, './tests/stubs/server-only.ts'),
+    },
+  },
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
