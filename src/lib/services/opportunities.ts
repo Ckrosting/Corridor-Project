@@ -6,6 +6,7 @@ import {
   properties, transactionStages,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
+import { sqlIn } from '@/lib/db-helpers';
 import { NotFoundError, ValidationError } from '@/lib/errors';
 import { propertyTitle } from '@/lib/format';
 import { recordAudit, updateWithVersion } from './audit';
@@ -135,7 +136,7 @@ export async function listOpportunities(f: OpportunityFilters = {}) {
   if (!f.includeSample) conds.push(eq(opportunities.isSample, false));
   if (!f.includeTerminal) conds.push(eq(transactionStages.isTerminal, false));
   if (f.marketId) conds.push(eq(opportunities.marketId, f.marketId));
-  if (f.stageIds?.length) conds.push(raw`opportunities.stage_id = any(${f.stageIds}::uuid[])`);
+  if (f.stageIds?.length) conds.push(sqlIn('opportunities.stage_id', f.stageIds));
   if (f.corridorId) {
     conds.push(raw`exists (select 1 from opportunity_properties op
       join property_corridors pc on pc.property_id = op.property_id

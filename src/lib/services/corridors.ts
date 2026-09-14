@@ -3,6 +3,7 @@ import { and, eq, isNull, sql as raw } from 'drizzle-orm';
 import { db } from '@/db';
 import { corridors, properties, propertyCorridors } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
+import { sqlIn } from '@/lib/db-helpers';
 import { NotFoundError } from '@/lib/errors';
 import {
   circleToPolygon, classifyRelevance, computeBBox, validateAreaGeometry,
@@ -105,7 +106,7 @@ export async function recomputeCorridorMembership(corridorId: string): Promise<{
     await db.delete(propertyCorridors).where(and(
       eq(propertyCorridors.corridorId, corridorId),
       eq(propertyCorridors.assignedVia, 'auto'),
-      raw`${propertyCorridors.propertyId} = any(${toRemove}::uuid[])`,
+      sqlIn('property_corridors.property_id', toRemove),
     ));
   }
 

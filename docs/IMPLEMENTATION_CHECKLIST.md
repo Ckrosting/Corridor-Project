@@ -42,24 +42,26 @@ Consequences:
 
 ## Phase 1 — Local foundation
 
-- [ ] Environment config module with typed validation and status reporting
-- [ ] Auth: Auth.js v5 credentials, bcrypt, admin/member roles
-- [ ] Dev-only sign-in shortcut, hard-disabled when `NODE_ENV=production`
-- [ ] Server-side authorization helpers (`requireUser`, `requireAdmin`)
-- [ ] Optimistic-concurrency helper (version tokens) + audit log writer
-- [ ] Markets + mall anchors CRUD
-- [ ] Corridors: radius seed, custom draw, persistent boundaries
-- [ ] Properties CRUD with all specified fields
-- [ ] Parcels: multiple per property, optional geometry, persistent edits
-- [ ] Corridor membership: many-to-many, recomputed on geometry change
-- [ ] Shared contacts + owner entities
-- [ ] Activity timeline / call logging
-- [ ] Follow-up views (overdue / today / upcoming / none scheduled)
-- [ ] Leaflet map: basemaps, draw/edit tools, filters, fit-to-bounds
-- [ ] Corridor workspace screen (map + table + side panel)
-- [ ] Property detail screen
-- [ ] Portfolio dashboard
-- [ ] Seed data: default statuses/stages + clearly-labelled sample records
+- [x] Environment config module with typed validation and status reporting
+- [x] Auth: Auth.js v5 credentials, bcrypt, admin/member roles
+- [x] Dev-only sign-in shortcut, hard-disabled when `NODE_ENV=production`
+- [x] Server-side authorization helpers (`requireUser`, `requireAdmin`)
+- [x] Optimistic-concurrency helper (version tokens) + audit log writer
+- [x] Corridors: radius seed, custom draw, persistent boundaries
+- [x] Properties service with all specified fields
+- [x] Parcels: multiple per property, optional geometry, persistent edits
+- [x] Corridor membership: many-to-many, recomputed on geometry change
+- [x] Activity timeline / call logging (service + UI)
+- [x] Follow-up queues (overdue / today / upcoming / none scheduled) — service
+- [x] Leaflet map: basemaps, draw/edit tools, fit-to-bounds, preserved viewport
+- [x] Corridor workspace screen (map + table + side panel + filters)
+- [x] Portfolio dashboard
+- [x] Seed data: default statuses/stages + clearly-labelled sample records
+- [ ] Markets + mall anchors CRUD screens
+- [ ] Property detail screen (full view)
+- [ ] Properties list screen
+- [ ] Follow-ups screen
+- [ ] Shared contacts screens
 
 ## Phase 2 — Pipeline, config, imports, collaboration
 
@@ -100,15 +102,20 @@ Consequences:
 
 ## Test coverage targets (from the brief)
 
-- [x] Corridor and parcel geometry validation/persistence — unit level
-- [ ] Parcel and corridor persistence — database level
-- [ ] Multiple parcels on one property
-- [ ] One property in overlapping corridors without duplication
-- [ ] Call history and follow-up persistence
-- [ ] Explicit opportunity promotion
-- [ ] Routine outreach stays out of the pipeline
+**51 tests passing** (`npm test`) across `tests/geometry.test.ts` and `tests/persistence.test.ts`.
+
+- [x] Corridor and parcel geometry validation/persistence — unit level (25 tests)
+- [x] Parcel and corridor persistence — database level
+- [x] Multiple parcels on one property (including a parcel ID with no geometry yet)
+- [x] One property in overlapping corridors without duplication
+- [x] Call history and follow-up persistence
+- [x] Call history survives outreach status changes
+- [x] Explicit opportunity promotion (reason, date, author recorded)
+- [x] Routine outreach stays out of the pipeline
+- [x] Opportunity removal and reopening without losing history
+- [x] Unknown values stay NULL; a real zero is stored as zero
+- [x] Access control helpers and concurrent-edit protection (version conflicts)
 - [ ] Import validation and duplicate handling
 - [ ] Repeated scans do not create duplicates
 - [ ] Reviewed data not overwritten by AI
-- [ ] API keys remain server-side
-- [ ] Access control and concurrent-edit protection
+- [ ] API keys remain server-side (assertion test)

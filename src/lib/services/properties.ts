@@ -8,6 +8,7 @@ import {
   propertyPriceHistory, propertyTags, tags, transactionStages,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
+import { sqlIn } from '@/lib/db-helpers';
 import { NotFoundError, ValidationError } from '@/lib/errors';
 import { areaAcres, computeBBox, validateAreaGeometry } from '@/lib/geo/polygon';
 import { diffFields, recordAudit, updateWithVersion } from './audit';
@@ -46,7 +47,7 @@ function buildWhere(f: PropertyFilters): SQL[] {
 
   if (f.outreachStatusIds?.length) conds.push(inArray(properties.outreachStatusId, f.outreachStatusIds));
   if (f.listingStatuses?.length) {
-    conds.push(raw`${properties.listingStatus}::text = any(${f.listingStatuses}::text[])`);
+    conds.push(sqlIn(raw`properties.listing_status::text`, f.listingStatuses));
   }
   if (f.propertyTypes?.length) conds.push(inArray(properties.propertyType, f.propertyTypes));
 
@@ -57,7 +58,7 @@ function buildWhere(f: PropertyFilters): SQL[] {
 
   if (f.tagIds?.length) {
     conds.push(raw`exists (select 1 from property_tags pt
-      where pt.property_id = properties.id and pt.tag_id = any(${f.tagIds}::uuid[]))`);
+      where pt.property_id = properties.id and ${sqlIn('pt.tag_id', f.tagIds)})`);
   }
 
   if (f.pipeline === 'in_pipeline' || f.pipeline === 'not_in_pipeline') {
