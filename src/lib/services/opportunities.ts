@@ -254,7 +254,7 @@ export async function updateOpportunity(id: string, input: {
     values.closedAt = toStage.category === 'closed_won' ? new Date() : null;
   }
 
-  const updated = await updateWithVersion({
+  const updated = await updateWithVersion<typeof opportunities.$inferSelect>({
     table: opportunities, id, expectedVersion: input.version, values, entityLabel: 'opportunity',
   });
 
@@ -290,7 +290,7 @@ export async function setOpportunityState(id: string, input: {
   const [before] = await db.select().from(opportunities).where(eq(opportunities.id, id)).limit(1);
   if (!before) throw new NotFoundError('Opportunity');
 
-  const updated = await updateWithVersion({
+  const updated = await updateWithVersion<typeof opportunities.$inferSelect>({
     table: opportunities, id, expectedVersion: input.version,
     values: {
       state: input.state,

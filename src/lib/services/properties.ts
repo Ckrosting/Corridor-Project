@@ -363,7 +363,7 @@ export async function updateProperty(
   values.humanVerifiedAt = new Date();
   values.humanVerifiedBy = actor.id;
 
-  const updated = await updateWithVersion({
+  const updated = await updateWithVersion<typeof properties.$inferSelect>({
     table: properties, id, expectedVersion: version, values, entityLabel: 'property',
   });
 
@@ -528,7 +528,7 @@ export async function updateParcel(id: string, input: {
     if (geometry && input.acreage === undefined) values.acreage = areaAcres(geometry).toFixed(4);
   }
 
-  const updated = await updateWithVersion({
+  const updated = await updateWithVersion<typeof propertyParcels.$inferSelect>({
     table: propertyParcels, id, expectedVersion: input.version, values, entityLabel: 'parcel',
   });
 
@@ -559,7 +559,7 @@ export async function deleteParcel(id: string, actor: Actor) {
 /* -------------------------------------------------------------------------- */
 
 export async function archiveProperty(id: string, version: number, actor: Actor) {
-  const updated = await updateWithVersion({
+  const updated = await updateWithVersion<typeof properties.$inferSelect>({
     table: properties, id, expectedVersion: version,
     values: { archivedAt: new Date(), updatedBy: actor.id },
     entityLabel: 'property',
@@ -569,7 +569,7 @@ export async function archiveProperty(id: string, version: number, actor: Actor)
 }
 
 export async function restoreProperty(id: string, version: number, actor: Actor) {
-  const updated = await updateWithVersion({
+  const updated = await updateWithVersion<typeof properties.$inferSelect>({
     table: properties, id, expectedVersion: version,
     values: { archivedAt: null, updatedBy: actor.id },
     entityLabel: 'property',

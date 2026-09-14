@@ -15,7 +15,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { and, eq, sql as raw } from 'drizzle-orm';
 import postgres from 'postgres';
 import * as schema from '../src/db/schema';
-import { circleToPolygon, computeBBox, validateAreaGeometry } from '../src/lib/geo/polygon';
+import { areaAcres, circleToPolygon, computeBBox, validateAreaGeometry } from '../src/lib/geo/polygon';
 
 const {
   users, appSettings, outreachStatuses, transactionStages, markets, mallAnchors,
@@ -315,6 +315,8 @@ async function main() {
       await db.insert(propertyParcels).values({
         propertyId: prop!.id, parcelIdText: `SAMPLE-${1000 + createdProps}`,
         label: 'Main parcel', geometry: parcel, geometrySource: 'manual_draw',
+        // Derived from the drawn shape, exactly as the app does when a user draws one.
+        acreage: areaAcres(parcel).toFixed(4),
         minLatitude: pb.minLat, maxLatitude: pb.maxLat,
         minLongitude: pb.minLng, maxLongitude: pb.maxLng,
         createdBy: adminUser?.id,
@@ -338,6 +340,7 @@ async function main() {
     await db.insert(propertyParcels).values({
       propertyId: propIds[0]!, parcelIdText: 'SAMPLE-1000-B', label: 'Adjacent parking parcel',
       geometry: extra, geometrySource: 'manual_draw',
+      acreage: areaAcres(extra).toFixed(4),
       minLatitude: eb.minLat, maxLatitude: eb.maxLat,
       minLongitude: eb.minLng, maxLongitude: eb.maxLng,
       createdBy: adminUser?.id,

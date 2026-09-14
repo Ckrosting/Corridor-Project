@@ -57,24 +57,26 @@ Consequences:
 - [x] Corridor workspace screen (map + table + side panel + filters)
 - [x] Portfolio dashboard
 - [x] Seed data: default statuses/stages + clearly-labelled sample records
-- [ ] Markets + mall anchors CRUD screens
-- [ ] Property detail screen (full view)
-- [ ] Properties list screen
-- [ ] Follow-ups screen
-- [ ] Shared contacts screens
+- [x] Markets + mall anchors CRUD screens (list, create, market map workspace)
+- [x] Property detail screen (full view, inline editor, conflict handling)
+- [x] Properties list screen with URL-backed filters
+- [x] Follow-ups screen (overdue / today / upcoming / unscheduled)
+- [x] Shared contacts screens (list + detail with cross-property call history)
 
 ## Phase 2 — Pipeline, config, imports, collaboration
 
-- [ ] Opportunities: explicit promotion only, reason + date captured
-- [ ] Transaction pipeline (table + board), removal/reopen with history
-- [ ] Configurable outreach statuses and transaction stages, with safe reassignment
-- [ ] Custom fields (text/number/date/checkbox/select)
-- [ ] Tags management
-- [ ] Attachments with storage abstraction (local ↔ S3)
-- [ ] Mall import template + CSV/XLSX import (map → preview → validate → confirm)
-- [ ] Property/contact import and export with stable IDs
+- [x] Opportunities: explicit promotion only, reason + date captured
+- [x] Transaction pipeline (table + board), removal/reopen with history
+- [x] Custom fields (text/number/date/checkbox/select) — rendered and editable
+- [x] Mall import service: column mapping, validation, duplicate detection, explicit commit
+- [x] CSV export with stable IDs + mall import template
+- [x] Concurrent-edit protection surfaced in the UI (conflict banner, no silent overwrite)
+- [ ] Import UI screen (service and tests done; screen pending)
+- [ ] XLSX import (CSV done)
+- [ ] Configurable statuses/stages admin UI, with safe reassignment
+- [ ] Tags management UI
+- [ ] Attachments upload UI (storage abstraction done)
 - [ ] Users admin screen
-- [ ] Concurrent-edit protection surfaced in the UI
 
 ## Phase 3 — Discovery
 
@@ -102,7 +104,7 @@ Consequences:
 
 ## Test coverage targets (from the brief)
 
-**51 tests passing** (`npm test`) across `tests/geometry.test.ts` and `tests/persistence.test.ts`.
+**67 tests passing** (`npm test`) across `tests/geometry.test.ts` and `tests/persistence.test.ts`.
 
 - [x] Corridor and parcel geometry validation/persistence — unit level (25 tests)
 - [x] Parcel and corridor persistence — database level
@@ -115,7 +117,8 @@ Consequences:
 - [x] Opportunity removal and reopening without losing history
 - [x] Unknown values stay NULL; a real zero is stored as zero
 - [x] Access control helpers and concurrent-edit protection (version conflicts)
-- [ ] Import validation and duplicate handling
+- [x] Import validation and duplicate handling (row errors, in-file and existing duplicates, re-import does not double data, explicit update)
+- [x] CSV round-trip: negative coordinates survive, formula injection escaped
 - [ ] Repeated scans do not create duplicates
 - [ ] Reviewed data not overwritten by AI
 - [ ] API keys remain server-side (assertion test)

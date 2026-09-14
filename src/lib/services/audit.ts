@@ -104,15 +104,23 @@ export async function recordAudit(input: AuditInput, tx = db): Promise<void> {
  * This is checked in a single atomic statement, so two simultaneous saves cannot
  * both succeed — unlike a read-then-compare, which has a race between the two.
  */
-export async function updateWithVersion<T extends Record<string, unknown>>(params: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  table: PgTable & { id: any; version: any };
+/**
+ * The row type is supplied explicitly by the caller
+ * (`updateWithVersion<typeof properties.$inferSelect>({...})`) rather than being
+ * inferred from a generic table parameter — making the table generic prevents
+ * drizzle from typing its own update and select builders.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type VersionedTable = PgTable & { id: any; version: any };
+
+export async function updateWithVersion<TRow = Record<string, unknown>>(params: {
+  table: VersionedTable;
   id: string;
   expectedVersion: number;
   values: Record<string, unknown>;
   tx?: typeof db;
   entityLabel?: string;
-}): Promise<T> {
+}): Promise<TRow> {
   const { table, id, expectedVersion, values, tx = db, entityLabel = 'record' } = params;
 
   const rows = await tx
@@ -136,5 +144,5 @@ export async function updateWithVersion<T extends Record<string, unknown>>(param
     );
   }
 
-  return rows[0] as T;
+  return rows[0] as TRow;
 }

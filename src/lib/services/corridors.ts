@@ -245,7 +245,7 @@ export async function updateCorridor(id: string, input: {
     Object.assign(values, boundaryColumns(boundary), { boundaryKind: nextKind, boundarySource: source });
   }
 
-  const updated = await updateWithVersion({
+  const updated = await updateWithVersion<typeof corridors.$inferSelect>({
     table: corridors, id, expectedVersion: input.version, values, entityLabel: 'corridor',
   });
 
