@@ -1,4 +1,10 @@
 * text=auto eol=lf
+
+# CSV templates are opened in Excel on Windows; keep CRLF line endings and the
+# BOM exactly as written, or Excel misreads them.
+*.csv -text
+
 *.png binary
 *.jpg binary
 *.ico binary
+*.pdf binary
