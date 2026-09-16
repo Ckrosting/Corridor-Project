@@ -9,11 +9,13 @@ import {
 import { Spinner } from '@/components/ui/primitives';
 
 /**
- * "Find New Listings" plus the two manual routes into the same review pipeline.
+ * "Find New Listings" plus the manual routes into this market.
  *
  * A scan is queued and runs in the worker; a submitted URL or uploaded document
- * is extracted inline because the user is waiting. All three land in the
- * discovery inbox for review — none writes a property record directly.
+ * is extracted inline because the user is waiting. Those three are AI-produced
+ * claims, so they land in the discovery inbox for review. A spreadsheet import
+ * is not: a broker export is already real listings, so it writes properties
+ * directly, keeping only the duplicate and dismissal checks.
  */
 export function DiscoveryAction({
   marketId, marketName, aiConfigured,
@@ -133,13 +135,25 @@ export function DiscoveryAction({
         ...(body.notes ?? []),
         ...(body.errors ?? []).map((e) => `Row ${e.rowNumber}: ${e.message}`),
       ]);
-      setMessage(describe(body.staged));
+      setMessage(describeImport(body.staged));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That file could not be read.');
     } finally {
       setBusy(false);
     }
+  }
+
+  /** A spreadsheet import writes properties, so it reports what landed, not what is queued. */
+  function describeImport(staged?: { created: number; duplicates: number; suppressed: number }): string {
+    if (!staged) return 'Done.';
+    const parts: string[] = [];
+    if (staged.created > 0) {
+      parts.push(`${staged.created} propert${staged.created === 1 ? 'y' : 'ies'} added to this market.`);
+    }
+    if (staged.duplicates > 0) parts.push(`${staged.duplicates} already here.`);
+    if (staged.suppressed > 0) parts.push(`${staged.suppressed} previously dismissed.`);
+    return parts.length ? parts.join(' ') : 'Nothing new to add — every row was already here.';
   }
 
   function describe(staged?: { created: number; duplicates: number; suppressed: number }): string {
@@ -200,7 +214,7 @@ export function DiscoveryAction({
                 <strong>Discovery is not configured.</strong> An administrator needs to set
                 {' '}<code className="rounded bg-amber-100 px-1">ANTHROPIC_API_KEY</code> on the
                 server. You can still add properties by hand from the map, or use the
-                {' '}<strong>Import candidates CSV</strong> tab, which needs no API key.
+                {' '}<strong>Import a listings export</strong> tab, which needs no API key.
               </span>
             </div>
           )}
@@ -265,9 +279,9 @@ export function DiscoveryAction({
             <>
               <p className="text-xs leading-relaxed text-ink-600">
                 For listings found outside the app - a broker inventory export (Crexi and similar,
-                as downloaded), or rows assembled by hand. This calls no AI model and costs nothing;
-                it stages rows straight into the discovery inbox under the same review rules as a
-                real scan.
+                as downloaded), or rows assembled by hand. This calls no AI model and costs nothing.
+                Rows become properties in this market straight away; anything already here, or
+                already dismissed, is skipped rather than duplicated.
               </p>
 
               <div className="space-y-1.5 rounded-lg border border-ink-200 p-2.5">

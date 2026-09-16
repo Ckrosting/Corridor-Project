@@ -269,10 +269,10 @@ async function defaultOutreachStatusId(): Promise<string | null> {
 }
 
 export async function createProperty(
-  input: Record<string, unknown> & { marketId: string; tagIds?: string[] },
+  input: Record<string, unknown> & { marketId: string; tagIds?: string[]; skipParcelMatch?: boolean },
   actor: Actor,
 ) {
-  const { tagIds, ...rest } = input;
+  const { tagIds, skipParcelMatch, ...rest } = input;
   const fields = rest as Record<string, unknown>;
 
   const values: Record<string, unknown> = {
@@ -304,7 +304,14 @@ export async function createProperty(
     actor,
   });
 
-  await tryAutoMatchCountyParcel(row!.id, row!.marketId, row!.latitude, row!.longitude, actor);
+  // A bulk import skips this: matching is several seconds of county lookups and
+  // tile tracing per property, which is fine for one property a person just
+  // typed in and minutes of dead time for a few hundred rows of a broker
+  // export. Those land with needsParcelOutline set and are filled in by the
+  // parcel backfill instead.
+  if (!skipParcelMatch) {
+    await tryAutoMatchCountyParcel(row!.id, row!.marketId, row!.latitude, row!.longitude, actor);
+  }
 
   return row!;
 }

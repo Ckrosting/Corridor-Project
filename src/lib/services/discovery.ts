@@ -27,6 +27,164 @@ export interface StageOutcome {
   duplicates: number;
 }
 
+export interface DirectImportOutcome {
+  created: number;
+  /** Matched a property already in the market. */
+  duplicates: number;
+  /** Previously dismissed, so deliberately not brought back. */
+  suppressed: number;
+}
+
+/**
+ * Writes candidates straight into a market as property records.
+ *
+ * The review inbox exists because AI research produces claims that need a
+ * person to believe them first. A broker's own inventory export is different:
+ * the rows are real listings with working links, so queueing several hundred of
+ * them for one-by-one approval is friction with no judgement attached to it.
+ *
+ * What the inbox does that still matters here is the part before the queue -
+ * suppression and duplicate matching. Re-exporting the same search next month
+ * returns mostly the same listings, so without those checks a second import
+ * would duplicate everything and resurrect anything already passed on. Both are
+ * kept; only the waiting room is skipped.
+ */
+export async function importCandidatesAsProperties(input: {
+  candidates: Candidate[];
+  marketId: string;
+  actor: Actor;
+}): Promise<DirectImportOutcome> {
+  const outcome: DirectImportOutcome = { created: 0, duplicates: 0, suppressed: 0 };
+  if (input.candidates.length === 0) return outcome;
+
+  const suppressions = await db.select().from(discoverySuppressions);
+  const suppressedUrls = new Set(suppressions.filter((s) => s.keyType === 'url').map((s) => s.keyValue));
+  const suppressedHashes = new Set(suppressions.filter((s) => s.keyType === 'hash').map((s) => s.keyValue));
+
+  const existing: MatchCandidate[] = await db
+    .select({
+      id: properties.id,
+      addressLine1: properties.addressLine1,
+      city: properties.city,
+      state: properties.state,
+      postalCode: properties.postalCode,
+      latitude: properties.latitude,
+      longitude: properties.longitude,
+      parcelIds: raw<string[]>`coalesce((select array_agg(pp.parcel_id_text)
+        from property_parcels pp
+        where pp.property_id = properties.id and pp.parcel_id_text is not null), '{}')`,
+    })
+    .from(properties)
+    .where(and(eq(properties.marketId, input.marketId), isNull(properties.archivedAt)));
+
+  // One export routinely lists the same property twice - a re-listing, or the
+  // same address under two brokers - so rows already taken from THIS batch have
+  // to count as existing too, not just what was in the market beforehand.
+  const seenUrls = new Set<string>();
+  const seenHashes = new Set<string>();
+
+  for (const candidate of input.candidates) {
+    const primaryUrl = candidate.sources[0]?.url ?? null;
+    const normalizedUrl = primaryUrl ? normalizeUrl(primaryUrl) : null;
+    const hash = addressHash(candidate);
+
+    if ((normalizedUrl && suppressedUrls.has(normalizedUrl)) || (hash && suppressedHashes.has(hash))) {
+      outcome.suppressed++;
+      continue;
+    }
+
+    if ((normalizedUrl && seenUrls.has(normalizedUrl)) || (hash && seenHashes.has(hash))) {
+      outcome.duplicates++;
+      continue;
+    }
+
+    if (findMatch(candidate, existing)) {
+      outcome.duplicates++;
+      continue;
+    }
+
+    const property = await createProperty({
+      marketId: input.marketId,
+      name: candidate.name,
+      addressLine1: candidate.addressLine1,
+      city: candidate.city,
+      state: candidate.state,
+      postalCode: candidate.postalCode,
+      county: candidate.county,
+      latitude: candidate.latitude,
+      longitude: candidate.longitude,
+      propertyType: candidate.propertyType,
+      propertySubtype: candidate.propertySubtype ?? null,
+      askingPrice: candidate.askingPrice != null ? String(candidate.askingPrice) : null,
+      buildingSqft: candidate.buildingSqft,
+      landAcreage: candidate.landAcreage != null ? String(candidate.landAcreage) : null,
+      noi: candidate.noi != null ? String(candidate.noi) : null,
+      capRateReported: candidate.capRateReported != null ? String(candidate.capRateReported) : null,
+      capRateReportedSource: candidate.capRateReported != null ? primaryUrl : null,
+      yearBuilt: candidate.yearBuilt ?? null,
+      tenantInfo: candidate.tenantInfo ?? null,
+      listingStatus: 'for_sale',
+      listingDate: candidate.listingDate,
+      locationSource: 'imported',
+      researchNotes: buildImportNote(candidate),
+      skipParcelMatch: true,
+    } as never, input.actor);
+
+    if (primaryUrl && normalizedUrl) {
+      await db.insert(propertyListingSources).values({
+        propertyId: property.id,
+        url: primaryUrl,
+        normalizedUrl,
+        sourceName: candidate.sources[0]?.sourceName ?? candidate.sources[0]?.title ?? null,
+        listingDate: candidate.listingDate,
+      }).onConflictDoNothing();
+    }
+
+    const brokerName = candidate.brokerName?.value ?? null;
+    if (brokerName) {
+      const [broker] = await db.insert(contacts).values({
+        name: brokerName,
+        company: candidate.brokerCompany?.value ?? null,
+        role: 'broker',
+        phone: candidate.brokerPhone?.value ?? null,
+        email: candidate.brokerEmail?.value ?? null,
+        source: primaryUrl ? `Listing export — ${primaryUrl}` : 'Listing export',
+        notes: 'Imported from a listing export. Verify before relying on these details.',
+        createdBy: input.actor.id,
+      }).returning();
+
+      await db.insert(propertyContacts).values({
+        propertyId: property.id, contactId: broker!.id, relationship: 'broker', isPrimary: true,
+      }).onConflictDoNothing();
+    }
+
+    if (normalizedUrl) seenUrls.add(normalizedUrl);
+    if (hash) seenHashes.add(hash);
+    existing.push({
+      id: property.id,
+      addressLine1: property.addressLine1,
+      city: property.city,
+      state: property.state,
+      postalCode: property.postalCode,
+      latitude: property.latitude,
+      longitude: property.longitude,
+      parcelIds: [],
+    });
+    outcome.created++;
+  }
+
+  return outcome;
+}
+
+function buildImportNote(candidate: Candidate): string {
+  const lines = ['Imported from a listing export. Values are the broker\'s own and are unverified.'];
+  if (candidate.sources.length) {
+    lines.push('', 'Sources:');
+    for (const s of candidate.sources) lines.push(`- ${s.sourceName ?? s.title ?? 'listing'}: ${s.url}`);
+  }
+  return lines.join('\n');
+}
+
 export async function stageCandidates(input: {
   candidates: Candidate[];
   scanId: string | null;

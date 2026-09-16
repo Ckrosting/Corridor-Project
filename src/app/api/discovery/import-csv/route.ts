@@ -7,7 +7,7 @@ import { AppError } from '@/lib/errors';
 import { haversineMeters } from '@/lib/geo/polygon';
 import type { Candidate } from '@/lib/ai/extraction';
 import { parseCandidateCsv, parseCandidateXlsx } from '@/lib/services/candidate-csv';
-import { stageCandidates } from '@/lib/services/discovery';
+import { importCandidatesAsProperties } from '@/lib/services/discovery';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -86,7 +86,7 @@ async function filterByRadius(candidates: Candidate[], marketId: string, radiusM
  * research step happened elsewhere.
  */
 export const POST = route(async (req: Request) => {
-  await requireUser();
+  const actor = await requireUser();
 
   const form = await req.formData();
   const file = form.get('file');
@@ -129,13 +129,17 @@ export const POST = route(async (req: Request) => {
 
   if (candidates.length === 0) {
     return ok({
-      staged: { created: 0, updatedExisting: 0, suppressed: 0, duplicates: 0 },
+      staged: { created: 0, suppressed: 0, duplicates: 0 },
       errors: parsed.errors,
       notes: ['No usable rows were left to import from that file.', ...notes],
     });
   }
 
-  const staged = await stageCandidates({ candidates, scanId: null, marketId, origin: 'manual_import' });
+  const staged = await importCandidatesAsProperties({ candidates, marketId, actor });
+
+  if (staged.created > 0) {
+    notes.push('Parcel outlines were not looked up during the import - run the parcel backfill to add them.');
+  }
 
   return ok({ staged, errors: parsed.errors, notes }, 201);
 });
