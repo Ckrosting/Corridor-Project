@@ -101,6 +101,15 @@ export function PropertyFiltersBar({
           Show sample data
         </label>
 
+        <label className="flex items-center gap-1.5 text-xs text-ink-600">
+          <input
+            type="checkbox"
+            checked={params.get('includeArchived') === 'true'}
+            onChange={(e) => apply((p) => { if (e.target.checked) p.set('includeArchived', 'true'); else p.delete('includeArchived'); })}
+          />
+          Show deleted
+        </label>
+
         {activeCount > 0 && (
           <button type="button" className="btn-ghost btn-sm" onClick={() => { setSearch(''); router.push(pathname); }}>
             <X size={12} /> Clear

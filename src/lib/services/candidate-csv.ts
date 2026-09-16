@@ -16,7 +16,7 @@ import type { Candidate } from '@/lib/ai/extraction';
  */
 export const CANDIDATE_CSV_COLUMNS = [
   'name', 'address_line1', 'city', 'state', 'postal_code', 'county',
-  'latitude', 'longitude', 'property_type', 'asking_price', 'building_sqft',
+  'latitude', 'longitude', 'property_type', 'property_subtype', 'asking_price', 'building_sqft',
   'land_acreage', 'noi', 'cap_rate', 'year_built', 'tenant_info',
   'listing_date', 'owner_name', 'broker_name', 'broker_company',
   'broker_phone', 'broker_email', 'source_url', 'source_title', 'source_name',
@@ -35,6 +35,7 @@ const COLUMN_ALIASES: Record<Column, string[]> = {
   latitude: ['latitude', 'lat'],
   longitude: ['longitude', 'lng', 'lon', 'long'],
   property_type: ['property_type', 'type'],
+  property_subtype: ['property_subtype', 'subtype'],
   asking_price: ['asking_price', 'price'],
   building_sqft: ['building_sqft', 'sqft', 'building_sq_ft'],
   land_acreage: ['land_acreage', 'acreage', 'acres', 'lot_size'],
@@ -243,6 +244,7 @@ export function parseCandidateRows(table: string[][]): CandidateParseResult {
       capRateReported: capRate(get(row, 'cap_rate')),
       yearBuilt: year(get(row, 'year_built')),
       tenantInfo: blank(get(row, 'tenant_info')),
+      propertySubtype: blank(get(row, 'property_subtype')),
       listingDate: dateOrNull(get(row, 'listing_date')),
       ownerName: sourced(blank(get(row, 'owner_name'))),
       brokerName: sourced(blank(get(row, 'broker_name'))),

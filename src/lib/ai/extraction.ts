@@ -51,6 +51,8 @@ export const candidateSchema = z.object({
   capRateReported: z.number().min(0).max(100).nullable().optional(),
   yearBuilt: z.number().int().nullable().optional(),
   tenantInfo: z.string().nullable().optional(),
+  /** The listing's own wording, kept out of the configured propertyType taxonomy. */
+  propertySubtype: z.string().nullable().optional(),
 
   /**
    * Only when a source states when the property was listed. Never the date of

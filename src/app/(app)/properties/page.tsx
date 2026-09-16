@@ -12,6 +12,7 @@ import {
 } from '@/lib/format';
 import { EmptyState, SampleBadge, StatusChip, Value } from '@/components/ui/primitives';
 import { PropertyFiltersBar } from './filters-bar';
+import { RestoreButton } from './restore-button';
 
 export const metadata = { title: 'Properties' };
 export const dynamic = 'force-dynamic';
@@ -42,6 +43,7 @@ export default async function PropertiesPage({
     pipeline: (one('pipeline') as PropertyFilters['pipeline']) ?? 'any',
     search: one('q'),
     needsParcelOutline: one('needsOutline') === 'true' ? true : undefined,
+    includeArchived: one('includeArchived') === 'true',
     includeSample,
     sort: (one('sort') as PropertyFilters['sort']) ?? 'updated',
     limit: 500,
@@ -105,9 +107,17 @@ export default async function PropertiesPage({
                   <tr key={p.id}>
                     <td>
                       <Link href={`/properties/${p.id}`} className="flex items-center gap-1.5">
-                        <span className="font-medium text-ink-900 hover:text-accent-700">{propertyTitle(p)}</span>
+                        <span className={`font-medium hover:text-accent-700 ${p.archivedAt ? 'text-ink-400 line-through' : 'text-ink-900'}`}>
+                          {propertyTitle(p)}
+                        </span>
                         {p.isSample && <SampleBadge />}
+                        {p.archivedAt && <span className="chip border-red-200 bg-red-50 text-red-700">Deleted</span>}
                       </Link>
+                      {p.archivedAt && (
+                        <div className="mt-0.5">
+                          <RestoreButton propertyId={p.id} version={p.version} />
+                        </div>
+                      )}
                       <div className="text-[11px] text-ink-500">
                         {formatAddress(p)}
                         {p.parcelCount > 0 && ` · ${p.parcelCount} parcel${p.parcelCount > 1 ? 's' : ''}`}

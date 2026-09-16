@@ -141,6 +141,7 @@ export async function stageCandidates(input: {
       capRateReported: candidate.capRateReported != null ? String(candidate.capRateReported) : null,
       yearBuilt: candidate.yearBuilt ?? null,
       tenantInfo: candidate.tenantInfo ?? null,
+      propertySubtype: candidate.propertySubtype ?? null,
       listingDate: candidate.listingDate,
 
       ownerName: candidate.ownerName.value,
@@ -209,6 +210,7 @@ async function buildProposedChanges(
   propose('capRateReported', existing.capRateReported, candidate.capRateReported);
   propose('yearBuilt', existing.yearBuilt, candidate.yearBuilt);
   propose('tenantInfo', existing.tenantInfo, candidate.tenantInfo);
+  propose('propertySubtype', existing.propertySubtype, candidate.propertySubtype);
   propose('listingDate', existing.listingDate, candidate.listingDate);
 
   // A price CHANGE is proposed even on a verified record, because a moving
@@ -258,6 +260,7 @@ export async function approveAsNewProperty(
     capRateReportedSource: result.capRateReported ? (result.sources?.[0]?.url ?? null) : null,
     yearBuilt: (overrides.yearBuilt as number) ?? result.yearBuilt ?? null,
     tenantInfo: (overrides.tenantInfo as string) ?? result.tenantInfo ?? null,
+    propertySubtype: (overrides.propertySubtype as string) ?? result.propertySubtype ?? null,
     listingStatus: 'for_sale',
     listingDate: result.listingDate ?? null,
     locationSource: 'discovery',

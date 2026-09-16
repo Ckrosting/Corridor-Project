@@ -143,8 +143,17 @@ describe('candidate import', () => {
     ));
 
     expect(parsed.unmappedHeaders).toEqual([
-      'Property Status', 'Property Subtype', 'Price/Unit', 'Price/SqFt', 'Price/Acre', 'Days on Market',
+      'Property Status', 'Price/Unit', 'Price/SqFt', 'Price/Acre', 'Days on Market',
     ]);
+  });
+
+  it('keeps the listing\'s own subtype out of the configured type taxonomy', () => {
+    const [candidate] = parseCandidateCsv(crexi(
+      'https://www.crexi.com/properties/5,Chestnut,On-Market,Land,"Commercial, Residential",4523 W Chestnut St,Tampa,FL,33607,Hillsborough County,,24000,,,,,,890000,,,1211,-82.52186,27.958998',
+    )).candidates;
+
+    expect(candidate!.propertyType).toBe('Land');
+    expect(candidate!.propertySubtype).toBe('Commercial, Residential');
   });
 
   it('refuses a file whose columns mean nothing rather than importing blanks', () => {

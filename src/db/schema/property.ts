@@ -142,6 +142,10 @@ export const properties = pgTable(
     needsParcelOutline: boolean('needs_parcel_outline').notNull().default(true),
 
     propertyType: text('property_type'),
+    // Free text, unlike propertyType, which is a configured taxonomy the UI
+    // filters on: a listing's own subtype ("Commercial, Residential") is the
+    // broker's wording and would pollute those filter values.
+    propertySubtype: text('property_subtype'),
 
     landAcreage: numeric('land_acreage', { precision: 12, scale: 4 }),
     buildingSqft: integer('building_sqft'),

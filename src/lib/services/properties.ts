@@ -121,6 +121,7 @@ export async function listProperties(f: PropertyFilters) {
       needsParcelOutline: properties.needsParcelOutline,
       needsMapPlacement: properties.needsMapPlacement,
       isSample: properties.isSample,
+      archivedAt: properties.archivedAt,
       updatedAt: properties.updatedAt,
       version: properties.version,
       outreachStatusId: properties.outreachStatusId,

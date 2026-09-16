@@ -233,7 +233,8 @@ export function PropertyPanel({
         <div className="border-b border-ink-200 bg-red-50 p-3">
           <p className="text-xs text-red-800">
             Delete <span className="font-medium">{propertyTitle(data)}</span>? This removes it (and its
-            parcels, contacts, and activity history) from view. This can be undone by an admin, but not from here.
+            parcels, contacts, and activity history) from view. Nothing is erased: tick
+            &ldquo;Show deleted&rdquo; on the Properties page to find it again and restore it.
           </p>
           {deleteError && <div className="banner-error mt-2">{deleteError}</div>}
           <div className="mt-2 flex gap-2">

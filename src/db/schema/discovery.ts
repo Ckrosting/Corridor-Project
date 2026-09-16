@@ -96,6 +96,7 @@ export const discoveryResults = pgTable(
     latitude: doublePrecision('latitude'),
     longitude: doublePrecision('longitude'),
     propertyType: text('property_type'),
+    propertySubtype: text('property_subtype'),
     askingPrice: numeric('asking_price', { precision: 14, scale: 2 }),
     buildingSqft: integer('building_sqft'),
     landAcreage: numeric('land_acreage', { precision: 12, scale: 4 }),
