@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { asc, isNull } from 'drizzle-orm';
-import { ArrowLeft, ExternalLink, FileText, Paperclip } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Paperclip, Camera } from 'lucide-react';
+import { streetViewUrl } from '@/lib/geo/street-view';
 import { db } from '@/db';
 import { outreachStatuses, tags } from '@/db/schema';
 import { requirePageUser } from '@/lib/auth/guards';
@@ -18,6 +19,7 @@ import {
   StatusChip, Value,
 } from '@/components/ui/primitives';
 import { PropertyEditor } from './property-editor';
+import { AttachmentPanel } from '@/components/workspace/attachment-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +33,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function PropertyDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePageUser();
+  const actor = await requirePageUser();
   const { id } = await params;
 
   let property: Awaited<ReturnType<typeof getPropertyDetail>>;
@@ -97,6 +99,17 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
               <Link href={`/corridors/${primaryCorridor.id}`} className="btn-secondary btn-sm">
                 Open on map <ExternalLink size={12} />
               </Link>
+            )}
+            {property.latitude != null && property.longitude != null && (
+              <a
+                href={streetViewUrl(property.latitude, property.longitude)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-secondary btn-sm"
+                title="Open Google Street View at this property's coordinates"
+              >
+                <Camera size={12} /> Street View <ExternalLink size={12} />
+              </a>
             )}
             {activeOpportunity && (
               <Link href={`/pipeline/${activeOpportunity.id}`} className="btn-secondary btn-sm">
@@ -353,32 +366,11 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
                 <h2 className="card-title flex items-center gap-1.5"><Paperclip size={14} /> Documents</h2>
               </div>
               <div className="p-4">
-                {property.attachments.length === 0 ? (
-                  <EmptyState
-                    icon={<FileText size={20} />}
-                    title="No documents"
-                    body="Flyers, offering memoranda, photos and other files attached to this property appear here."
-                  />
-                ) : (
-                  <ul className="space-y-1.5">
-                    {property.attachments.map((a) => (
-                      <li key={a.id}>
-                        <a
-                          href={`/api/attachments/${a.id}`}
-                          className="flex items-center justify-between gap-2 rounded-md border border-ink-200 px-2.5 py-2 hover:bg-ink-50"
-                        >
-                          <span className="min-w-0">
-                            <span className="block truncate text-xs font-medium text-ink-900">{a.filename}</span>
-                            <span className="block text-[11px] text-ink-500">
-                              {a.kind.replace(/_/g, ' ')} · {(a.sizeBytes / 1024).toFixed(0)} KB · {formatDate(a.createdAt)}
-                            </span>
-                          </span>
-                          <ExternalLink size={13} className="shrink-0 text-ink-400" />
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <AttachmentPanel
+                  propertyId={property.id}
+                  attachments={property.attachments}
+                  isAdmin={actor.role === 'admin'}
+                />
               </div>
             </section>
 

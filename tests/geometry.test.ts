@@ -3,7 +3,7 @@ import {
   GeometryError, areaAcres, bboxContains, circleToPolygon, classifyRelevance,
   computeBBox, expandBBox, haversineMeters, pointInGeometry, validateAreaGeometry,
 } from '@/lib/geo/polygon';
-import { geometryToLeafletLatLngs, leafletLatLngsToGeometry } from '@/lib/geo/convert';
+import { geometryToLeafletLatLngs, leafletLatLngsToGeometry, type LeafletLatLngTuple } from '@/lib/geo/convert';
 import type { AreaGeometry } from '@/lib/geo/types';
 
 /** A ~0.01deg square near Augusta, GA - roughly 1.1km on a side. */
@@ -187,13 +187,17 @@ describe('classifyRelevance', () => {
 
 describe('leaflet conversion', () => {
   it('round-trips a polygon through Leaflet ordering', () => {
-    const leaflet = geometryToLeafletLatLngs(square);
-    // Leaflet order is [lat, lng] and drops the closing point.
-    expect(leaflet[0]![0]![0]).toEqual([33.0, -82.0]);
-    expect(leaflet[0]![0]).toHaveLength(4);
+    const leaflet = geometryToLeafletLatLngs(square) as LeafletLatLngTuple[][];
+    // Leaflet order is [lat, lng] and drops the closing point. Exactly two
+    // levels deep (rings, then points) - not three - so that getLatLngs()
+    // round-trips through leafletLatLngsToGeometry without corruption; see
+    // the long comment on geometryToLeafletLatLngs for why a third level here
+    // silently breaks every parcel/corridor edit.
+    expect(leaflet[0]![0]).toEqual([33.0, -82.0]);
+    expect(leaflet[0]).toHaveLength(4);
 
     const back = validateAreaGeometry(
-      leafletLatLngsToGeometry(leaflet[0]![0]!.map(([lat, lng]) => ({ lat, lng }))),
+      leafletLatLngsToGeometry(leaflet[0]!.map(([lat, lng]) => ({ lat, lng }))),
     );
     expect(back.coordinates[0]).toEqual(square.coordinates[0]);
   });

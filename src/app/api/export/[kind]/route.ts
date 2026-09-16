@@ -2,7 +2,8 @@ import { requireUser } from '@/lib/auth/guards';
 import { route } from '@/lib/api';
 import { AppError } from '@/lib/errors';
 import {
-  exportContactsCsv, exportMallsCsv, exportPropertiesCsv, mallImportTemplateCsv,
+  candidateImportTemplateCsv, exportContactsCsv, exportMallsCsv, exportPropertiesCsv,
+  mallImportTemplateCsv, propertyImportTemplateCsv,
 } from '@/lib/services/export';
 
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,14 @@ export const GET = route(async (req: Request, ctx: { params: Promise<{ kind: str
     case 'mall-template':
       body = mallImportTemplateCsv();
       filename = 'hull-corridor-mall-import-template.csv';
+      break;
+    case 'candidate-template':
+      body = candidateImportTemplateCsv();
+      filename = 'hull-corridor-candidate-import-template.csv';
+      break;
+    case 'property-template':
+      body = propertyImportTemplateCsv();
+      filename = 'hull-corridor-property-import-template.csv';
       break;
     default:
       throw new AppError(404, `Unknown export "${kind}".`, 'unknown_export');

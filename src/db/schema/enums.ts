@@ -14,6 +14,8 @@ export const geometrySourceEnum = pgEnum('geometry_source', [
   'manual_draw', // drawn by a user on the map - approximate research outline
   'radius',      // generated from a mall anchor + radius
   'imported',    // came from an import file
+  'county_gis',  // matched to a real surveyed parcel from a county GIS feed
+  'traced_tile', // auto-traced from Regrid's free parcel-line tile imagery - approximate, unverified
 ]);
 
 export const corridorBoundaryKindEnum = pgEnum('corridor_boundary_kind', ['radius', 'custom']);

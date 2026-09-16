@@ -157,3 +157,48 @@ export function mallImportTemplateCsv(): string {
   ];
   return toCsv(headers, examples);
 }
+
+/**
+ * Template for the property importer (see `src/lib/services/property-import.ts`).
+ * Unlike the discovery-candidate template, this is for property research the
+ * team already has - existing owner/contact info, not for-sale listings.
+ */
+export function propertyImportTemplateCsv(): string {
+  const headers = [
+    'name', 'address_line1', 'city', 'state', 'postal_code', 'property_type',
+    'last_sale_date', 'sale_price', 'owner', 'contact',
+  ];
+  const examples = [
+    [
+      'Example Retail Plaza', '123 Main St', 'Statesboro', 'GA', '30458', 'Retail',
+      '2020-06-15', '1200000', 'Jane Doe', '(912) 555-1234',
+    ],
+  ];
+  return toCsv(headers, examples);
+}
+
+/**
+ * Template for bulk-staging discovery candidates found outside the app (by
+ * hand, or by a research task that does its own web searching instead of
+ * calling the Anthropic API). See `src/lib/services/candidate-csv.ts` for how
+ * a filled-in copy is parsed and staged into the discovery inbox.
+ */
+export function candidateImportTemplateCsv(): string {
+  const headers = [
+    'name', 'address_line1', 'city', 'state', 'postal_code', 'county',
+    'latitude', 'longitude', 'property_type', 'asking_price', 'building_sqft',
+    'land_acreage', 'listing_date', 'owner_name', 'broker_name', 'broker_company',
+    'broker_phone', 'broker_email', 'source_url', 'source_title', 'source_name',
+    'evidence_excerpt', 'location_note', 'needs_verification',
+  ];
+  const examples = [
+    [
+      'Example Retail Plaza', '123 Main St', 'Tampa', 'FL', '33625', '',
+      '', '', 'Retail - Strip Center', '2500000', '15000', '1.2',
+      '', '', 'Jane Doe', 'ABC Realty', '813-555-1234', '',
+      'https://www.loopnet.com/Listing/example', 'Example Retail Plaza for Sale', 'LoopNet',
+      'Offered at $2,500,000, 15,000 SF on 1.2 acres.', '', 'postalCode;latitude;longitude',
+    ],
+  ];
+  return toCsv(headers, examples);
+}

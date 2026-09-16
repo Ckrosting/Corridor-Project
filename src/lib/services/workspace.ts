@@ -68,7 +68,9 @@ export async function getCorridorWorkspace(corridorId: string, filters: Partial<
         propertyId: propertyParcels.propertyId,
         geometry: propertyParcels.geometry,
         label: propertyParcels.label,
+        geometrySource: propertyParcels.geometrySource,
         parcelIdText: propertyParcels.parcelIdText,
+        version: propertyParcels.version,
       })
         .from(propertyParcels)
         .where(inArray(propertyParcels.propertyId, properties.map((p) => p.id)))
@@ -119,6 +121,8 @@ export async function getMarketWorkspace(marketId: string) {
         propertyId: propertyParcels.propertyId,
         geometry: propertyParcels.geometry,
         label: propertyParcels.label,
+        geometrySource: propertyParcels.geometrySource,
+        version: propertyParcels.version,
       })
         .from(propertyParcels)
         .where(inArray(propertyParcels.propertyId, properties.map((p) => p.id)))

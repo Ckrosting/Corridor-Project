@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Link2, Search, Upload, X } from 'lucide-react';
+import {
+  FileSpreadsheet, Link2, Search, Upload, X,
+} from 'lucide-react';
 import { Spinner } from '@/components/ui/primitives';
 
 /**
@@ -23,7 +25,7 @@ export function DiscoveryAction({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<'scan' | 'url' | 'file'>('scan');
+  const [tab, setTab] = useState<'scan' | 'url' | 'file' | 'csv'>('scan');
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +106,34 @@ export function DiscoveryAction({
     }
   }
 
+  async function submitCsv(file: File) {
+    setBusy(true);
+    setError(null);
+    setNotes([]);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('corridorId', corridorId);
+      form.append('marketId', marketId);
+
+      const res = await fetch('/api/discovery/import-csv', { method: 'POST', body: form });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        staged?: { created: number; duplicates: number; suppressed: number };
+        errors?: Array<{ rowNumber: number; message: string }>;
+      };
+      if (!res.ok) throw new Error(body.error ?? 'That file could not be read.');
+
+      setNotes((body.errors ?? []).map((e) => `Row ${e.rowNumber}: ${e.message}`));
+      setMessage(describe(body.staged));
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'That file could not be read.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function describe(staged?: { created: number; duplicates: number; suppressed: number }): string {
     if (!staged) return 'Done.';
     if (staged.created > 0) {
@@ -142,6 +172,7 @@ export function DiscoveryAction({
             ['scan', 'Search the web'],
             ['url', 'Add a listing URL'],
             ['file', 'Upload a flyer / OM'],
+            ['csv', 'Import candidates CSV'],
           ] as const).map(([key, label]) => (
             <button
               key={key} type="button" onClick={() => { setTab(key); setError(null); setMessage(null); }}
@@ -155,12 +186,13 @@ export function DiscoveryAction({
         </div>
 
         <div className="space-y-3 p-4">
-          {!aiConfigured && (
+          {!aiConfigured && tab !== 'csv' && (
             <div className="banner-warn">
               <span>
                 <strong>Discovery is not configured.</strong> An administrator needs to set
                 {' '}<code className="rounded bg-amber-100 px-1">ANTHROPIC_API_KEY</code> on the
-                server. You can still add properties by hand from the map.
+                server. You can still add properties by hand from the map, or use the
+                {' '}<strong>Import candidates CSV</strong> tab, which needs no API key.
               </span>
             </div>
           )}
@@ -218,6 +250,31 @@ export function DiscoveryAction({
                 />
               </label>
               {busy && <div className="banner-info"><Spinner /> Reading the document…</div>}
+            </>
+          )}
+
+          {tab === 'csv' && (
+            <>
+              <p className="text-xs leading-relaxed text-ink-600">
+                For candidates found outside the app - by hand, or by a research task that does its
+                own web searching. This calls no AI model and costs nothing; it stages rows straight
+                into the discovery inbox under the same review rules as a real scan.
+              </p>
+              <a
+                href="/api/export/candidate-template"
+                className="btn-secondary btn-sm w-full justify-center"
+              >
+                Download the column template
+              </a>
+              <label className="flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 border-dashed border-ink-300 px-4 py-6 text-center hover:border-accent-500 hover:bg-accent-50">
+                <FileSpreadsheet size={20} className="text-ink-400" />
+                <span className="text-xs font-medium text-ink-800">Choose a CSV file</span>
+                <input
+                  type="file" accept=".csv,text/csv" className="hidden" disabled={busy}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void submitCsv(f); e.target.value = ''; }}
+                />
+              </label>
+              {busy && <div className="banner-info"><Spinner /> Reading the file…</div>}
             </>
           )}
 

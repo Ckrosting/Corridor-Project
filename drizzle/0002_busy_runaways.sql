@@ -1,0 +1,1 @@
+ALTER TYPE "public"."geometry_source" ADD VALUE 'traced_tile';

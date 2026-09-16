@@ -34,7 +34,7 @@ export async function stageCandidates(input: {
   scanId: string | null;
   corridorId: string | null;
   marketId: string | null;
-  origin: 'scan' | 'manual_url' | 'manual_document';
+  origin: 'scan' | 'manual_url' | 'manual_document' | 'manual_import';
 }): Promise<StageOutcome> {
   const outcome: StageOutcome = { created: 0, updatedExisting: 0, suppressed: 0, duplicates: 0 };
   if (input.candidates.length === 0) return outcome;
@@ -402,6 +402,44 @@ export async function reviewResult(
   await recordAudit({
     entityType: 'discovery_result', entityId: resultId, action: status,
     summary: `Discovery result marked ${status.replace(/_/g, ' ')}`,
+    actor,
+  });
+}
+
+/**
+ * Undoes a reject/archive: moves the result back to "new" so it shows up in
+ * the main review queue again, and removes the suppression rows created when
+ * it was dismissed. Without removing those, the same listing would silently
+ * refuse to be (re-)staged by a future scan even though the reviewer just
+ * asked to reconsider it - the whole point of undoing the dismissal.
+ */
+export async function reopenResult(resultId: string, actor: Actor) {
+  const [result] = await db.select().from(discoveryResults).where(eq(discoveryResults.id, resultId)).limit(1);
+  if (!result) throw new NotFoundError('Discovery result');
+  if (result.status !== 'rejected' && result.status !== 'archived') {
+    throw new ValidationError('Only a rejected or archived result can be reopened.');
+  }
+
+  const keys = [result.normalizedUrl, result.dedupeHash].filter((k): k is string => Boolean(k));
+  if (keys.length > 0) {
+    await db.delete(discoverySuppressions).where(or(
+      ...(result.normalizedUrl ? [and(eq(discoverySuppressions.keyType, 'url'), eq(discoverySuppressions.keyValue, result.normalizedUrl))] : []),
+      ...(result.dedupeHash ? [and(eq(discoverySuppressions.keyType, 'hash'), eq(discoverySuppressions.keyValue, result.dedupeHash))] : []),
+    ));
+  }
+
+  await db.update(discoveryResults).set({
+    status: 'new',
+    reviewNote: null,
+    reviewedBy: null,
+    reviewedByLabel: null,
+    reviewedAt: null,
+    updatedAt: new Date(),
+  }).where(eq(discoveryResults.id, resultId));
+
+  await recordAudit({
+    entityType: 'discovery_result', entityId: resultId, action: 'reopen',
+    summary: 'Discovery result moved back to review',
     actor,
   });
 }

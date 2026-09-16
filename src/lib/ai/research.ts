@@ -4,8 +4,8 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { estimateCostUsd, getAnthropic, webSearchToolType, type CostRates } from './client';
 import {
   EXTRACTION_PROMPT, GROUND_RULES, buildCorridorSearchPrompt,
-  buildDocumentExtractionPrompt, buildUrlExtractionPrompt, scanResultSchema,
-  type ScanResult,
+  buildDocumentExtractionPrompt, buildUrlExtractionPrompt, scanResultWireSchema,
+  wireToScanResult, type ScanResult,
 } from './extraction';
 import { env } from '@/lib/env';
 
@@ -104,7 +104,7 @@ async function extractStructured(
     max_tokens: env.ai.maxOutputTokens,
     system: GROUND_RULES,
     messages: [{ role: 'user', content }],
-    output_config: { format: zodOutputFormat(scanResultSchema) },
+    output_config: { format: zodOutputFormat(scanResultWireSchema) },
   });
 
   addUsage(usage, response as unknown as Anthropic.Message, 0, rates);
@@ -116,11 +116,12 @@ async function extractStructured(
 
   // parsed_output is null when the model could not satisfy the schema. Returning
   // nothing is correct here: unvalidated data must never reach the database.
-  const parsed = response.parsed_output;
-  if (!parsed) {
+  const parsedWire = response.parsed_output;
+  if (!parsedWire) {
     notes.push('The model returned a response that did not match the required format, so nothing was imported.');
     return { result: { candidates: [], coverageNotes: notes, searchedSources: [] }, notes };
   }
+  const parsed = wireToScanResult(parsedWire);
 
   return { result: parsed, notes };
 }
@@ -167,7 +168,20 @@ export async function researchCorridor(
 
   const prose = textOf(research);
   if (!prose.trim()) {
-    notes.push('The search returned no usable findings for this corridor.');
+    // `max_tokens` here means the model spent its entire output budget on the
+    // search tool-use loop (queries + retrieved-page summaries all count
+    // against it) and was cut off before writing any final synthesis - a
+    // silent, expensive-but-empty scan otherwise. Surfacing the real
+    // stop_reason and how many searches actually ran means a repeat of this
+    // is diagnosable from the scan record alone, without re-running (and
+    // re-paying for) a scan just to find out why.
+    notes.push(
+      `The search returned no usable findings for this corridor `
+      + `(stop_reason: ${research.stop_reason ?? 'unknown'}, searches used: ${inspected.searches}/${env.ai.maxWebSearchesPerScan}).`
+      + (research.stop_reason === 'max_tokens'
+        ? ' The model ran out of its output budget mid-search before writing a final summary - raise AI_MAX_OUTPUT_TOKENS to give it more room.'
+        : ''),
+    );
     return { result: { candidates: [], coverageNotes: notes, searchedSources: [] }, usage, notes };
   }
 

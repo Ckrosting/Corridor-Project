@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
-  Archive, Check, ExternalLink, Link2, Search, TriangleAlert, X,
+  Archive, Check, ExternalLink, Link2, RotateCcw, Search, TriangleAlert, X,
 } from 'lucide-react';
 import { formatDate, formatDateTime, formatMoney, formatSqft } from '@/lib/format';
 import { EmptyState, Field, SectionHeading, Spinner, StatusChip, Value } from '@/components/ui/primitives';
@@ -255,7 +255,11 @@ export function DiscoveryInbox({
                         )}
                         {r.origin !== 'scan' && (
                           <span className="chip border-ink-200 bg-ink-50 text-ink-600">
-                            {r.origin === 'manual_url' ? 'Submitted URL' : 'Uploaded document'}
+                            {r.origin === 'manual_url'
+                              ? 'Submitted URL'
+                              : r.origin === 'manual_import'
+                                ? 'Imported from CSV'
+                                : 'Uploaded document'}
                           </span>
                         )}
                       </div>
@@ -544,11 +548,25 @@ function ReviewCard({
           </div>
         </section>
       ) : (
-        <div className="banner-ok">
+        <div className="banner-ok flex flex-wrap items-center justify-between gap-2">
           <span>
             Reviewed {result.reviewedAt ? formatDateTime(result.reviewedAt) : ''}
             {result.reviewedByLabel ? ` by ${result.reviewedByLabel}` : ''} — status: {result.status}.
           </span>
+          {(result.status === 'rejected' || result.status === 'archived') && (
+            <button
+              type="button"
+              className="btn-secondary btn-sm shrink-0"
+              disabled={busy}
+              onClick={() => void onAct(
+                result.id,
+                { action: 'reopen' },
+                'Moved back to review. It can be found again by a future scan or import.',
+              )}
+            >
+              {busy && <Spinner />} <RotateCcw size={13} /> Move back to review
+            </button>
+          )}
         </div>
       )}
     </>

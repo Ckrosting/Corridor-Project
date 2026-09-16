@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, isNull, or, sql as raw, type SQL } from 'd
 import { db } from '@/db';
 import {
   activities, attachments, contacts, corridors, customFieldDefs, customFieldValues,
-  opportunities, opportunityProperties, outreachStatuses, ownerEntities, properties,
+  markets, opportunities, opportunityProperties, outreachStatuses, ownerEntities, properties,
   propertyContacts, propertyCorridors, propertyListingSources, propertyParcels,
   propertyPriceHistory, propertyTags, tags, transactionStages,
 } from '@/db/schema';
@@ -11,6 +11,8 @@ import type { Actor } from '@/lib/auth/guards';
 import { sqlIn } from '@/lib/db-helpers';
 import { NotFoundError, ValidationError } from '@/lib/errors';
 import { areaAcres, computeBBox, validateAreaGeometry } from '@/lib/geo/polygon';
+import { lookupCountyParcel, type CountyParcelMatch } from '@/lib/geo/county-parcels';
+import { traceParcelFromTiles, type TracedParcel } from '@/lib/geo/parcel-trace';
 import { diffFields, recordAudit, updateWithVersion } from './audit';
 import { recomputeMembershipForProperty } from './corridors';
 
@@ -323,7 +325,100 @@ export async function createProperty(
     actor,
   });
 
+  await tryAutoMatchCountyParcel(row!.id, row!.marketId, row!.latitude, row!.longitude, actor);
+
   return row!;
+}
+
+/**
+ * When a property has coordinates and no parcel yet, tries to find one
+ * automatically - first the real thing (a verified county GIS feed for the
+ * market, see county-parcels.ts), and only if that comes back empty, an
+ * auto-traced outline from Regrid's free tile imagery (see parcel-trace.ts).
+ * Fires on both property creation and any edit that changes coordinates -
+ * including dragging the pin on the map - so moving a point onto a real
+ * parcel outlines it right away instead of only on the next import/backfill.
+ * Never blocks or fails the write that triggered it: any lookup problem is
+ * swallowed, since this is a bonus enrichment, not a requirement.
+ */
+async function tryAutoMatchCountyParcel(
+  propertyId: string, marketId: string, latitude: number | null, longitude: number | null, actor: Actor,
+): Promise<void> {
+  if (latitude == null || longitude == null) return;
+  const point = { lat: latitude, lng: longitude };
+
+  const [market] = await db.select({ name: markets.name }).from(markets).where(eq(markets.id, marketId)).limit(1);
+  if (market) {
+    const match = await lookupCountyParcel(point, market.name);
+    if (match) {
+      await attachCountyParcelMatch(propertyId, match, actor);
+      return;
+    }
+  }
+
+  const traced = await traceParcelFromTiles(point);
+  if (traced) await attachTracedParcel(propertyId, traced, actor);
+}
+
+/**
+ * Saves a matched county-GIS parcel (from either a point or a PIN lookup) as
+ * the property's parcel. Exported so other flows - e.g. the property
+ * importer, which often already has a parcel PIN in its source data - can
+ * reuse the exact same attach logic instead of duplicating it.
+ */
+export async function attachCountyParcelMatch(
+  propertyId: string, match: CountyParcelMatch, actor: Actor,
+): Promise<void> {
+  const noteLines = [`Source: ${match.sourceLabel} (public county GIS, unverified).`];
+  if (match.ownerName) noteLines.push(`Owner per county records: ${match.ownerName}.`);
+  if (match.situsAddress) noteLines.push(`Situs address per county records: ${match.situsAddress}.`);
+
+  await createParcel({
+    propertyId,
+    parcelIdText: match.parcelId,
+    label: 'County GIS parcel',
+    geometry: match.geometry,
+    acreage: match.acreage != null ? match.acreage.toFixed(4) : undefined,
+    notes: noteLines.join(' '),
+    geometrySource: 'county_gis',
+  }, actor);
+
+  // A property matched by PIN (e.g. from an import with no coordinates of its
+  // own) can now be placed on the map from the real parcel we just found -
+  // the bbox centre, a simple and honest stand-in for a true centroid, rather
+  // than leaving it stuck at "needs map placement" when we plainly know where
+  // it is.
+  const [property] = await db.select({
+    id: properties.id, latitude: properties.latitude, longitude: properties.longitude, marketId: properties.marketId, version: properties.version,
+  }).from(properties).where(eq(properties.id, propertyId)).limit(1);
+  if (property && property.latitude == null && property.longitude == null) {
+    const bbox = computeBBox(match.geometry);
+    await updateProperty(propertyId, {
+      version: property.version,
+      latitude: (bbox.minLat + bbox.maxLat) / 2,
+      longitude: (bbox.minLng + bbox.maxLng) / 2,
+      locationSource: 'county_gis',
+    }, actor);
+  }
+}
+
+/**
+ * Saves a parcel outline auto-traced from Regrid's free tile imagery (see
+ * `traceParcelFromTiles`) - the fallback for a property with no PIN and no
+ * county GIS feed to query at all. Unlike `attachCountyParcelMatch`, this
+ * never claims a county record backs it, and it never invents coordinates -
+ * a traced shape only exists because the property already had a point to
+ * trace around.
+ */
+export async function attachTracedParcel(propertyId: string, traced: TracedParcel, actor: Actor): Promise<void> {
+  await createParcel({
+    propertyId,
+    label: 'Traced from imagery (unverified)',
+    geometry: traced.geometry,
+    acreage: traced.acreage.toFixed(4),
+    notes: `Source: ${traced.sourceLabel}. Auto-traced from parcel-line imagery, not a surveyed boundary - verify before relying on it.`,
+    geometrySource: 'traced_tile',
+  }, actor);
 }
 
 export async function updateProperty(
@@ -376,6 +471,12 @@ export async function updateProperty(
 
   if (customFields) await setCustomFieldValues(id, customFields, actor);
   if (coordsTouched) await recomputeMembershipForProperty(id);
+
+  // Only when the property had no parcel yet - never silently replace a
+  // human-drawn or already-matched parcel just because coordinates changed.
+  if (coordsTouched && before.needsParcelOutline && updated.latitude != null && updated.longitude != null) {
+    await tryAutoMatchCountyParcel(id, updated.marketId, updated.latitude, updated.longitude, actor);
+  }
 
   if (corridorIds) {
     await db.delete(propertyCorridors).where(and(
@@ -474,6 +575,7 @@ export async function createParcel(input: {
   geometry?: unknown;
   acreage?: string | null;
   notes?: string | null;
+  geometrySource?: 'manual_draw' | 'radius' | 'imported' | 'county_gis' | 'traced_tile';
 }, actor: Actor) {
   const geometry = input.geometry ? validateAreaGeometry(input.geometry) : null;
   const bbox = geometry ? computeBBox(geometry) : null;
@@ -483,7 +585,7 @@ export async function createParcel(input: {
     parcelIdText: input.parcelIdText ?? null,
     label: input.label ?? null,
     geometry,
-    geometrySource: 'manual_draw',
+    geometrySource: input.geometrySource ?? 'manual_draw',
     // Derive acreage from the drawn shape when the user did not supply one.
     acreage: input.acreage ?? (geometry ? areaAcres(geometry).toFixed(4) : null),
     notes: input.notes ?? null,

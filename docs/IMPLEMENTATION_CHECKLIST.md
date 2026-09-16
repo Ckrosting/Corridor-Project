@@ -79,7 +79,7 @@ Consequences:
 - [~] Property/contact **import** — validation pipeline exists and export is
       complete, but there is no dedicated import screen yet
 - [ ] XLSX import (CSV only; Excel "Save As → CSV" documented in the UI)
-- [ ] Attachment drag-and-drop control on the property screen
+- [x] Attachment drag-and-drop control on the property screen
 
 ## Phase 3 — Discovery
 

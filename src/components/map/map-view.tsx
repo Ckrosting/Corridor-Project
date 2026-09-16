@@ -5,7 +5,8 @@ import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import { geometryToLeafletLatLngs, leafletLatLngsToGeometry } from '@/lib/geo/convert';
 import type { AreaGeometry, LatLng } from '@/lib/geo/types';
-import { DEFAULT_CENTER, DEFAULT_ZOOM, getBasemaps } from './basemaps';
+import { streetViewUrl } from '@/lib/geo/street-view';
+import { DEFAULT_CENTER, DEFAULT_ZOOM, getBasemaps, PARCEL_LINES_OVERLAY } from './basemaps';
 
 export interface MapProperty {
   id: string;
@@ -23,6 +24,10 @@ export interface MapParcel {
   propertyId: string;
   geometry: AreaGeometry | null;
   label: string | null;
+  /** A county-sourced parcel is a real surveyed line, not an approximate hand-drawn outline. */
+  geometrySource?: string | null;
+  /** Shown on hover instead of the parcel's own label/source. */
+  propertyTitle?: string | null;
 }
 
 export interface MapCorridor {
@@ -40,6 +45,17 @@ export interface MapAnchor {
 }
 
 export type DrawMode = 'none' | 'corridor' | 'parcel' | 'point';
+
+/**
+ * Shifts a Leaflet polygon's latlngs (which nest arbitrarily deep - a simple
+ * ring, a ring-with-holes, or a multipolygon) by a fixed lat/lng delta.
+ * Recurses until it finds actual L.LatLng leaves.
+ */
+function translateLatLngs(latlngs: unknown, dLat: number, dLng: number): unknown {
+  if (Array.isArray(latlngs)) return latlngs.map((v) => translateLatLngs(v, dLat, dLng));
+  const ll = latlngs as L.LatLng;
+  return L.latLng(ll.lat + dLat, ll.lng + dLng);
+}
 
 export interface MapViewHandle {
   fitTo(geometry: AreaGeometry): void;
@@ -69,6 +85,8 @@ export interface MapViewProps {
    * workspace must not throw away where the user was.
    */
   initialFit?: AreaGeometry | null;
+  /** Used instead of `initialFit` when there is no boundary to fit to - e.g. a market with no corridors yet, centred on its mall anchor. */
+  initialCenter?: { point: LatLng; zoom: number } | null;
   ref?: React.Ref<MapViewHandle>;
 
   onSelectProperty(id: string | null): void;
@@ -81,6 +99,8 @@ export interface MapViewProps {
   onParcelEdited(parcelId: string, geometry: AreaGeometry): void;
   /** Fires when the user clicks the map in 'point' mode (placing a property). */
   onPointPlaced?(point: LatLng): void;
+  /** Fires when a property marker is dragged to a new spot. */
+  onPropertyMoved?(propertyId: string, point: LatLng): void;
 }
 
 /**
@@ -96,8 +116,8 @@ export interface MapViewProps {
  */
 export function MapView({
   properties, parcels, corridors, anchors, selectedPropertyId, activeCorridorId,
-  drawMode, initialView, initialFit, ref,
-  onSelectProperty, onViewChange, onShapeDrawn, onCorridorEdited, onParcelEdited, onPointPlaced,
+  drawMode, initialView, initialFit, initialCenter, ref,
+  onSelectProperty, onViewChange, onShapeDrawn, onCorridorEdited, onParcelEdited, onPointPlaced, onPropertyMoved,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -106,18 +126,34 @@ export function MapView({
   const parcelLayerRef = useRef<L.LayerGroup | null>(null);
   const corridorLayerRef = useRef<L.LayerGroup | null>(null);
   const anchorLayerRef = useRef<L.LayerGroup | null>(null);
+  const highlightLayerRef = useRef<L.LayerGroup | null>(null);
 
   const markersRef = useRef(new Map<string, L.Marker>());
   const parcelShapesRef = useRef(new Map<string, L.Polygon>());
   const corridorShapesRef = useRef(new Map<string, L.Polygon>());
+  const highlightShapeRef = useRef<L.CircleMarker | null>(null);
+  const selectedPropertyIdRef = useRef<string | null>(selectedPropertyId);
+  selectedPropertyIdRef.current = selectedPropertyId;
+  const parcelsRef = useRef(parcels);
+  parcelsRef.current = parcels;
+  // While a marker with its own (non-authoritative) parcel outline is being
+  // dragged, this holds enough to translate that outline live: the marker's
+  // position when the drag started, and each affected parcel's shape and its
+  // starting latlngs, so every frame can recompute "original + delta" rather
+  // than drifting from repeated small nudges.
+  const parcelDragRef = useRef<{
+    propertyId: string;
+    markerStart: L.LatLng;
+    parcels: Array<{ id: string; shape: L.Polygon; originalLatLngs: unknown }>;
+  } | null>(null);
 
   const [basemaps] = useState(() => getBasemaps());
   const [ready, setReady] = useState(false);
 
   // Callbacks are held in a ref so the map is created exactly once; otherwise a
   // parent re-render would tear down and rebuild the whole map.
-  const handlers = useRef({ onSelectProperty, onViewChange, onShapeDrawn, onCorridorEdited, onParcelEdited, onPointPlaced });
-  handlers.current = { onSelectProperty, onViewChange, onShapeDrawn, onCorridorEdited, onParcelEdited, onPointPlaced };
+  const handlers = useRef({ onSelectProperty, onViewChange, onShapeDrawn, onCorridorEdited, onParcelEdited, onPointPlaced, onPropertyMoved });
+  handlers.current = { onSelectProperty, onViewChange, onShapeDrawn, onCorridorEdited, onParcelEdited, onPointPlaced, onPropertyMoved };
 
   /* ------------------------------------------------------------- Map setup */
 
@@ -136,16 +172,31 @@ export function MapView({
     // Base layers. Providers that are not configured are omitted from the
     // switcher; the reason is surfaced separately in the UI.
     const available = basemaps.filter((b) => !b.unavailableReason && b.url);
+    // Default to satellite when a provider is configured; otherwise street.
+    const defaultId = available.some((b) => b.id === 'satellite') ? 'satellite' : 'street';
     const layers: Record<string, L.TileLayer> = {};
-    available.forEach((b, i) => {
-      const layer = L.tileLayer(b.url, { attribution: b.attribution, maxZoom: b.maxZoom });
+    available.forEach((b) => {
+      const layer = L.tileLayer(b.url, {
+        attribution: b.attribution, maxZoom: b.maxZoom, maxNativeZoom: b.maxNativeZoom,
+      });
       layers[b.label] = layer;
-      if (i === 0) layer.addTo(map);
+      if (b.id === defaultId) layer.addTo(map);
     });
     if (Object.keys(layers).length > 1) L.control.layers(layers, {}, { position: 'topright' }).addTo(map);
 
+    // Third-party tax parcel lines, always on top of the chosen basemap - not
+    // part of the basemap switcher above, since it's an overlay, not a base.
+    L.tileLayer(PARCEL_LINES_OVERLAY.url, {
+      attribution: PARCEL_LINES_OVERLAY.attribution,
+      minZoom: PARCEL_LINES_OVERLAY.minZoom,
+      maxZoom: PARCEL_LINES_OVERLAY.maxZoom,
+      maxNativeZoom: PARCEL_LINES_OVERLAY.maxNativeZoom,
+      pane: 'overlayPane',
+    }).addTo(map);
+
     corridorLayerRef.current = L.layerGroup().addTo(map);
     parcelLayerRef.current = L.layerGroup().addTo(map);
+    highlightLayerRef.current = L.layerGroup().addTo(map);
     anchorLayerRef.current = L.layerGroup().addTo(map);
     propertyLayerRef.current = L.layerGroup().addTo(map);
 
@@ -190,6 +241,13 @@ export function MapView({
       }
     });
 
+    // Right-click anywhere on the map opens Google Street View at that point.
+    // Leaflet already suppresses the browser's own context menu on the map
+    // container, so this doesn't fight a native menu for the same click.
+    map.on('contextmenu', (e: L.LeafletMouseEvent) => {
+      window.open(streetViewUrl(e.latlng.lat, e.latlng.lng), '_blank', 'noopener,noreferrer');
+    });
+
     if (!initialView && initialFit) {
       try {
         const layer = L.polygon(geometryToLeafletLatLngs(initialFit) as never);
@@ -197,6 +255,8 @@ export function MapView({
       } catch (err) {
         console.error('[map] could not fit to initial geometry', err);
       }
+    } else if (!initialView && !initialFit && initialCenter) {
+      map.setView([initialCenter.point.lat, initialCenter.point.lng], initialCenter.zoom);
     }
 
     setReady(true);
@@ -305,11 +365,14 @@ export function MapView({
       seen.add(parcel.id);
 
       const isSelected = parcel.propertyId === selectedPropertyId;
+      // Amber reads clearly against satellite imagery (green/gray/brown) in a
+      // way the previous muted slate didn't - the old unselected style was
+      // barely visible until you were already looking for it.
       const style: L.PathOptions = {
-        color: isSelected ? '#1d4ed8' : '#475569',
-        weight: isSelected ? 2.5 : 1.5,
-        fillColor: isSelected ? '#3b82f6' : '#64748b',
-        fillOpacity: isSelected ? 0.25 : 0.12,
+        color: isSelected ? '#1d4ed8' : '#f59e0b',
+        weight: isSelected ? 3 : 2,
+        fillColor: isSelected ? '#3b82f6' : '#fbbf24',
+        fillOpacity: isSelected ? 0.3 : 0.2,
       };
 
       const existing = parcelShapesRef.current.get(parcel.id);
@@ -320,10 +383,7 @@ export function MapView({
         existing.setStyle(style);
       } else {
         const poly = L.polygon(latlngs as never, style);
-        poly.bindTooltip(
-          `${parcel.label ?? 'Parcel'} — approximate research outline`,
-          { sticky: true, direction: 'top' },
-        );
+        poly.bindTooltip(parcel.propertyTitle ?? parcel.label ?? 'Parcel', { sticky: true, direction: 'top' });
         poly.on('click', (e) => {
           L.DomEvent.stopPropagation(e);
           handlers.current.onSelectProperty(parcel.propertyId);
@@ -348,6 +408,52 @@ export function MapView({
       }
     }
   }, [parcels, selectedPropertyId, ready]);
+
+  /* ---------------------------------------------- Selection highlight ring */
+
+  // A property with no real surveyed parcel has nothing to draw when
+  // selected, which reads as broken - clicking every other pin outlines its
+  // parcel, but this one just... doesn't react. This ring is an honest stand-
+  // in: it never claims to be a boundary (no tooltip, no edit handles, a
+  // fixed pixel size rather than a geographic shape), it just answers "yes,
+  // this is the one you clicked" the same way a real parcel would.
+  useEffect(() => {
+    const group = highlightLayerRef.current;
+    if (!group || !ready) return;
+
+    const clear = () => {
+      if (highlightShapeRef.current) {
+        group.removeLayer(highlightShapeRef.current);
+        highlightShapeRef.current = null;
+      }
+    };
+
+    if (!selectedPropertyId) { clear(); return; }
+
+    const hasRealParcel = parcels.some((p) => p.propertyId === selectedPropertyId && p.geometry);
+    if (hasRealParcel) { clear(); return; }
+
+    const property = properties.find((p) => p.id === selectedPropertyId);
+    if (!property || property.latitude == null || property.longitude == null) { clear(); return; }
+
+    // Reuse one persistent circle rather than clear-and-recreate: that way a
+    // drag handler on the marker can move this same instance in real time
+    // (see the property marker effect below), instead of the ring only
+    // catching up once the drag is saved and the page re-renders.
+    if (highlightShapeRef.current) {
+      highlightShapeRef.current.setLatLng([property.latitude, property.longitude]);
+    } else {
+      highlightShapeRef.current = L.circleMarker([property.latitude, property.longitude], {
+        radius: 22,
+        color: '#1d4ed8',
+        weight: 2,
+        fillColor: '#3b82f6',
+        fillOpacity: 0.2,
+        interactive: false,
+        className: 'hc-point-highlight',
+      }).addTo(group);
+    }
+  }, [parcels, properties, selectedPropertyId, ready]);
 
   /* --------------------------------------------------------------- Anchors */
 
@@ -405,7 +511,7 @@ export function MapView({
         existing.setIcon(icon);
         existing.setZIndexOffset(isSelected ? 1000 : 0);
       } else {
-        const marker = L.marker([property.latitude, property.longitude], { icon, riseOnHover: true });
+        const marker = L.marker([property.latitude, property.longitude], { icon, riseOnHover: true, draggable: true, autoPan: true });
         marker.bindTooltip(
           `${property.title}${property.statusLabel ? ` — ${property.statusLabel}` : ''}${property.isSample ? ' (sample)' : ''}`,
           { direction: 'top', offset: [0, -8] },
@@ -415,6 +521,75 @@ export function MapView({
           // Selecting never moves the map: the user's current view is preserved
           // so they do not lose their place when opening the side panel.
           handlers.current.onSelectProperty(property.id);
+        });
+        marker.on('dragstart', () => {
+          marker.closeTooltip();
+          // Any outline this property already has - traced, hand-drawn, or
+          // imported - describes a specific piece of ground the user is
+          // choosing to move together with the pin. A county GIS match is
+          // different: that shape is someone else's survey record, not ours
+          // to shift because a pin got nudged, so it is deliberately excluded
+          // and stays exactly where the county says it is.
+          const movable = parcelsRef.current.filter((p) => (
+            p.propertyId === property.id && p.geometry && p.geometrySource !== 'county_gis'
+          ));
+          const draggedParcels: Array<{ id: string; shape: L.Polygon; originalLatLngs: unknown }> = [];
+          for (const p of movable) {
+            const shape = parcelShapesRef.current.get(p.id);
+            if (shape) draggedParcels.push({ id: p.id, shape, originalLatLngs: shape.getLatLngs() });
+          }
+          parcelDragRef.current = { propertyId: property.id, markerStart: marker.getLatLng(), parcels: draggedParcels };
+        });
+        marker.on('drag', () => {
+          // If this pin's highlight ring is showing (no real parcel to
+          // outline), move it along with the pin live - otherwise it would
+          // only catch up once the drag is saved and the page re-renders.
+          if (property.id === selectedPropertyIdRef.current) {
+            highlightShapeRef.current?.setLatLng(marker.getLatLng());
+          }
+
+          const drag = parcelDragRef.current;
+          const map = mapRef.current;
+          if (drag && drag.propertyId === property.id && map) {
+            // A cheap CSS transform on the shape's own <path> element, not a
+            // real geometry change - calling Leaflet's setLatLngs on every
+            // mousemove during a drag fights with Geoman's own per-layer
+            // bookkeeping (it patches every Polygon, not just ones in edit
+            // mode) and throws mid-drag. The real geometry is only touched
+            // once, at drop.
+            const startPt = map.latLngToLayerPoint(drag.markerStart);
+            const curPt = map.latLngToLayerPoint(marker.getLatLng());
+            const dx = curPt.x - startPt.x;
+            const dy = curPt.y - startPt.y;
+            for (const p of drag.parcels) {
+              const el = p.shape.getElement() as SVGGraphicsElement | null;
+              if (el) el.style.transform = `translate(${dx}px, ${dy}px)`;
+            }
+          }
+        });
+        marker.on('dragend', () => {
+          const { lat, lng } = marker.getLatLng();
+          handlers.current.onPropertyMoved?.(property.id, { lat, lng });
+
+          const drag = parcelDragRef.current;
+          if (drag && drag.propertyId === property.id) {
+            const cur = marker.getLatLng();
+            const dLat = cur.lat - drag.markerStart.lat;
+            const dLng = cur.lng - drag.markerStart.lng;
+            for (const p of drag.parcels) {
+              const el = p.shape.getElement() as SVGGraphicsElement | null;
+              if (el) el.style.transform = '';
+              try {
+                const translated = translateLatLngs(p.originalLatLngs, dLat, dLng);
+                p.shape.setLatLngs(translated as never);
+                const geometry = leafletLatLngsToGeometry(p.shape.getLatLngs() as never);
+                handlers.current.onParcelEdited(p.id, geometry);
+              } catch (err) {
+                console.error('[map] could not save translated parcel', err);
+              }
+            }
+          }
+          parcelDragRef.current = null;
         });
         marker.addTo(group);
         markersRef.current.set(property.id, marker);

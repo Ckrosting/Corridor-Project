@@ -9,14 +9,26 @@ import type { AreaGeometry, LatLng, LinearRing } from './types';
 
 export type LeafletLatLngTuple = [number, number]; // [lat, lng]
 
-/** GeoJSON geometry -> Leaflet positions, ready for L.polygon(). */
-export function geometryToLeafletLatLngs(geometry: AreaGeometry): LeafletLatLngTuple[][][] {
+/**
+ * GeoJSON geometry -> Leaflet positions, ready for L.polygon().
+ *
+ * A Polygon becomes rings (outer + holes) - exactly two levels deep, the same
+ * shape `leafletLatLngsToGeometry` below expects back from `getLatLngs()`.
+ * Wrapping it in one more array (so it type-matches the MultiPolygon branch)
+ * looks harmless for drawing - Leaflet's renderer flattens either shape the
+ * same way - but it is not harmless for the round trip: `getLatLngs()` then
+ * hands back that same extra level, `leafletLatLngsToGeometry` misreads a
+ * whole ring-array as one point (`{lat, lng}` on an array is `undefined`),
+ * and every saved edit fails geometry validation. A MultiPolygon genuinely
+ * needs the third level (which polygon), so only that branch keeps it.
+ */
+export function geometryToLeafletLatLngs(geometry: AreaGeometry): LeafletLatLngTuple[][] | LeafletLatLngTuple[][][] {
   const ringToLeaflet = (ring: LinearRing): LeafletLatLngTuple[] =>
     // Leaflet does not want the repeated closing point; it closes polygons itself.
     ring.slice(0, -1).map(([lng, lat]) => [lat, lng] as LeafletLatLngTuple);
 
   return geometry.type === 'Polygon'
-    ? [geometry.coordinates.map(ringToLeaflet)]
+    ? geometry.coordinates.map(ringToLeaflet)
     : geometry.coordinates.map((poly) => poly.map(ringToLeaflet));
 }
 

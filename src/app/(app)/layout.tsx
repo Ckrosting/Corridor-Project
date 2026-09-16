@@ -20,6 +20,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         eq(opportunities.state, 'active'),
         isNull(opportunities.archivedAt),
         eq(transactionStages.isTerminal, false),
+        // Badges reflect real, actionable work regardless of whether sample
+        // data is currently being shown elsewhere - see getFollowUps' same rule.
+        eq(opportunities.isSample, false),
       )),
   ]);
 

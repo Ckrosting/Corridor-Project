@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Crosshair, Filter, Maximize2, PencilLine, Plus, Search, Squircle, X,
+  Crosshair, Filter, Maximize2, PencilLine, Plus, Search, Squircle, Trash2, X,
 } from 'lucide-react';
 import { Map, type DrawMode, type MapViewHandle } from '@/components/map';
 import type { AreaGeometry, LatLng } from '@/lib/geo/types';
@@ -40,6 +40,7 @@ export interface WorkspaceProperty {
   parcelCount: number;
   activityCount: number;
   opportunityId: string | null;
+  version: number;
 }
 
 export interface WorkspaceCorridor {
@@ -61,9 +62,10 @@ interface Props {
   tags: Array<{ id: string; name: string; color: string }>;
   propertyTypes: string[];
   properties: WorkspaceProperty[];
-  parcels: Array<{ id: string; propertyId: string; geometry: AreaGeometry | null; label: string | null }>;
+  parcels: Array<{ id: string; propertyId: string; geometry: AreaGeometry | null; label: string | null; geometrySource?: string | null; version?: number }>;
   /** Presence flag only — the API key itself never reaches the browser. */
   aiConfigured: boolean;
+  isAdmin: boolean;
 }
 
 const VIEW_STORAGE_KEY = 'hc.mapView';
@@ -78,7 +80,7 @@ const VIEW_STORAGE_KEY = 'hc.mapView';
  */
 export function CorridorWorkspace({
   corridor, market, siblingCorridors, anchors, statuses, tags, propertyTypes, properties,
-  parcels, aiConfigured,
+  parcels, aiConfigured, isAdmin,
 }: Props) {
   const router = useRouter();
   const mapRef = useRef<MapViewHandle>(null);
@@ -87,6 +89,7 @@ export function CorridorWorkspace({
   const [drawMode, setDrawMode] = useState<DrawMode>('none');
   const [pendingParcelFor, setPendingParcelFor] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [initialView, setInitialView] = useState<{ center: LatLng; zoom: number } | null>(null);
@@ -157,10 +160,12 @@ export function CorridorWorkspace({
   }, [properties, search, statusFilter, listingFilter, typeFilter, pipelineFilter]);
 
   const visibleIds = useMemo(() => new Set(visible.map((p) => p.id)), [visible]);
-  const visibleParcels = useMemo(
-    () => parcels.filter((p) => visibleIds.has(p.propertyId)),
-    [parcels, visibleIds],
-  );
+  const visibleParcels = useMemo(() => parcels
+    .filter((p) => visibleIds.has(p.propertyId))
+    .map((p) => {
+      const property = properties.find((x) => x.id === p.propertyId);
+      return { ...p, propertyTitle: property ? propertyTitle(property) : null };
+    }), [parcels, visibleIds, properties]);
 
   const activeFilterCount =
     statusFilter.length + listingFilter.length + typeFilter.length + tagFilter.length +
@@ -201,6 +206,21 @@ export function CorridorWorkspace({
       setDrawMode('none');
     }
   }, [corridor.id, corridor.version, router]);
+
+  const deleteCorridor = useCallback(async () => {
+    setBusy('Deleting corridor…');
+    try {
+      const res = await fetch(`/api/corridors/${corridor.id}`, { method: 'DELETE' });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not delete the corridor.');
+      router.push(`/markets/${market.id}`);
+      router.refresh();
+    } catch (err) {
+      flash('error', err instanceof Error ? err.message : 'Could not delete the corridor.');
+      setBusy(null);
+      setConfirmingDelete(false);
+    }
+  }, [corridor.id, market.id, router]);
 
   const saveParcel = useCallback(async (propertyId: string, geometry: AreaGeometry) => {
     setBusy('Saving parcel…');
@@ -256,6 +276,33 @@ export function CorridorWorkspace({
       setBusy(null);
     }
   }, [parcels, router]);
+
+  const handlePropertyMoved = useCallback(async (propertyId: string, point: LatLng) => {
+    setBusy('Saving location…');
+    try {
+      // Re-read the property's version immediately before writing, so a
+      // concurrent edit is detected by the server rather than silently
+      // overwritten - the same pattern as a parcel edit.
+      const current = properties.find((p) => p.id === propertyId);
+      const res = await fetch(`/api/properties/${propertyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          latitude: point.lat, longitude: point.lng, locationSource: 'manual',
+          version: current?.version ?? 1,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not save the new location.');
+      flash('ok', 'Location updated.');
+      router.refresh();
+    } catch (err) {
+      flash('error', err instanceof Error ? err.message : 'Could not save the new location.');
+      router.refresh();
+    } finally {
+      setBusy(null);
+    }
+  }, [properties, router]);
 
   /* ------------------------------------------------------------------ Render */
 
@@ -360,6 +407,39 @@ export function CorridorWorkspace({
           <Link href={`/properties/new?corridorId=${corridor.id}&marketId=${market.id}`} className="btn-primary btn-sm">
             <Plus size={13} /> Property
           </Link>
+
+          {isAdmin && (
+            confirmingDelete ? (
+              <div className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2 py-1">
+                <span className="text-xs text-red-700">Delete this corridor?</span>
+                <button
+                  type="button"
+                  className="rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                  onClick={deleteCorridor}
+                  disabled={busy !== null}
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  className="rounded px-2 py-0.5 text-xs text-ink-600 hover:bg-ink-100"
+                  onClick={() => setConfirmingDelete(false)}
+                  disabled={busy !== null}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="btn-secondary btn-sm text-red-600 hover:bg-red-50"
+                onClick={() => setConfirmingDelete(true)}
+                title="Delete this corridor (properties and their history are kept)"
+              >
+                <Trash2 size={13} /> Delete corridor
+              </button>
+            )
+          )}
         </div>
       </header>
 
@@ -432,6 +512,7 @@ export function CorridorWorkspace({
               onShapeDrawn={handleShapeDrawn}
               onCorridorEdited={(_id, geometry) => void saveCorridorBoundary(geometry)}
               onParcelEdited={(id, geometry) => void handleParcelEdited(id, geometry)}
+              onPropertyMoved={(id, point) => void handlePropertyMoved(id, point)}
             />
           )}
 

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  Check, Copy, ExternalLink, Mail, MapPin, Phone, Squircle, TrendingUp, X,
+  Camera, Check, Copy, ExternalLink, Mail, MapPin, Phone, Squircle, TrendingUp, X,
 } from 'lucide-react';
 import {
   ACTIVITY_TYPE_LABELS, CALL_OUTCOME_LABELS, CONTACT_ROLE_LABELS, LISTING_STATUS_LABELS,
@@ -14,6 +14,7 @@ import {
   ApproximateBoundaryNote, EmptyState, Field, SampleBadge, SectionHeading,
   Spinner, StatusChip, Value,
 } from '@/components/ui/primitives';
+import { streetViewUrl } from '@/lib/geo/street-view';
 import { CallLogger, type OutreachStatusOption } from './call-logger';
 import { PromoteDialog } from './promote-dialog';
 
@@ -182,6 +183,17 @@ export function PropertyPanel({
           <button type="button" className="btn-ghost btn-sm" onClick={onZoomToProperty} title="Zoom the map to this property">
             <MapPin size={13} /> Zoom
           </button>
+          {data.latitude != null && data.longitude != null && (
+            <a
+              href={streetViewUrl(data.latitude, data.longitude)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-ghost btn-sm"
+              title="Open Google Street View at this property's coordinates"
+            >
+              <Camera size={13} /> Street View
+            </a>
+          )}
           <Link href={`/properties/${data.id}`} className="btn-ghost btn-sm" title="Open the full detail view">
             <ExternalLink size={13} /> Full view
           </Link>

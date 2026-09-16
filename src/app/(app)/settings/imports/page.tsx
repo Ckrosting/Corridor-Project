@@ -1,13 +1,19 @@
 import Link from 'next/link';
+import { asc, isNull } from 'drizzle-orm';
 import { ArrowLeft, Download } from 'lucide-react';
+import { db } from '@/db';
+import { markets } from '@/db/schema';
 import { requirePageAdmin } from '@/lib/auth/guards';
 import { MallImporter } from './mall-importer';
+import { PropertyImporter } from './property-importer';
 
 export const metadata = { title: 'Import & export' };
 export const dynamic = 'force-dynamic';
 
 export default async function ImportsPage() {
   await requirePageAdmin('/settings/imports');
+  const marketList = await db.select({ id: markets.id, name: markets.name })
+    .from(markets).where(isNull(markets.archivedAt)).orderBy(asc(markets.name));
 
   return (
     <>
@@ -57,6 +63,23 @@ export default async function ImportsPage() {
             </div>
             <div className="p-4">
               <MallImporter />
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card-header">
+              <h2 className="card-title">Property import</h2>
+              <Link href="/api/export/property-template" className="btn-secondary btn-sm" prefetch={false}>
+                <Download size={13} /> Download template
+              </Link>
+            </div>
+            <div className="p-4">
+              <p className="mb-3 text-xs leading-relaxed text-ink-600">
+                For existing property research you already have - ownership, contact numbers, prior
+                sale price - not for-sale listings. Rows become real properties (and owner contacts)
+                directly in the market you choose; nothing goes through the discovery review inbox.
+              </p>
+              <PropertyImporter markets={marketList} />
             </div>
           </section>
 

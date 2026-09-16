@@ -52,7 +52,6 @@ Working but unfinished. None of these blocks daily use.
 |---|---|
 | **XLSX import** | Only CSV is parsed. Excel's *Save As → CSV UTF-8* is a 10-second workaround, and the import screen says so. `exceljs` is already a dependency if this becomes worth finishing. |
 | **Property and contact import** | Mall import is complete end to end. Property and contact **export** work; importing them reuses the same validated pipeline but has no dedicated screen yet. |
-| **Attachment upload UI** | The API route, storage driver, type/size/magic-number validation and download path all work. The property detail screen lists attachments but has no drag-and-drop control yet; uploads currently go through the discovery document path or the API. |
 | **Editing a logged call** | Calls can be created and are never destroyed by status changes. Editing an existing call is defined in the validation schema but has no UI; this is intentional caution about rewriting history. |
 | **Saved views** | The table exists and filters are URL-backed and shareable, but named saved views have no UI. |
 | **Bulk actions** | No multi-select bulk edit or bulk archive. |

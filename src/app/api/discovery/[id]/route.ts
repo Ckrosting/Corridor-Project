@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth/guards';
 import { ok, readJson, route } from '@/lib/api';
-import { approveAsNewProperty, linkToProperty, reviewResult } from '@/lib/services/discovery';
+import {
+  approveAsNewProperty, linkToProperty, reopenResult, reviewResult,
+} from '@/lib/services/discovery';
 import { AppError } from '@/lib/errors';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +27,7 @@ const schema = z.discriminatedUnion('action', [
     action: z.enum(['reject', 'archive', 'needs_research']),
     note: z.string().trim().max(2000).nullish(),
   }),
+  z.object({ action: z.literal('reopen') }),
 ]);
 
 export const POST = route(async (req: Request, ctx: Ctx) => {
@@ -48,6 +51,9 @@ export const POST = route(async (req: Request, ctx: Ctx) => {
       await reviewResult(id, status, input.note ?? null, actor);
       return ok({ status });
     }
+    case 'reopen':
+      await reopenResult(id, actor);
+      return ok({ status: 'new' });
     default:
       throw new AppError(400, 'Unknown review action.', 'bad_action');
   }

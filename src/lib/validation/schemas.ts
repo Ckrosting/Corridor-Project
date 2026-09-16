@@ -13,9 +13,17 @@ const trimmed = (max: number) => z.string().trim().max(max);
 const optionalText = (max: number) =>
   trimmed(max).nullish().transform((v) => (v === '' || v === undefined ? null : v));
 
-/** Accepts "", null, "1234.50" or 1234.5 and yields a decimal string or null. */
+/**
+ * Accepts "", null, "1234.50" or 1234.5 and yields a decimal string or null.
+ *
+ * `.optional()` (rather than a `z.undefined()` union member) is required so Zod
+ * treats the key as genuinely optional - a key entirely absent from the request
+ * body (as opposed to present with value `undefined`) otherwise fails with
+ * "expected nonoptional" even though every value this field accepts already
+ * folds down to `null`.
+ */
 const optionalDecimal = (opts: { min?: number; max?: number } = {}) =>
-  z.union([z.string(), z.number(), z.null(), z.undefined()]).transform((v, ctx) => {
+  z.union([z.string(), z.number(), z.null()]).optional().transform((v, ctx) => {
     if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
     const n = typeof v === 'number' ? v : Number(String(v).replace(/[$,\s]/g, ''));
     if (!Number.isFinite(n)) {
@@ -33,8 +41,9 @@ const optionalDecimal = (opts: { min?: number; max?: number } = {}) =>
     return n.toString();
   });
 
+/** See `optionalDecimal` above for why `.optional()` replaces a `z.undefined()` union member. */
 const optionalInt = (opts: { min?: number; max?: number } = {}) =>
-  z.union([z.string(), z.number(), z.null(), z.undefined()]).transform((v, ctx) => {
+  z.union([z.string(), z.number(), z.null()]).optional().transform((v, ctx) => {
     if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
     const n = typeof v === 'number' ? v : Number(String(v).replace(/[,\s]/g, ''));
     if (!Number.isInteger(n)) {
@@ -52,8 +61,10 @@ const optionalInt = (opts: { min?: number; max?: number } = {}) =>
     return n;
   });
 
+/** See `optionalDecimal` above for why `.optional()` replaces a `z.undefined()` union member. */
 const optionalDate = z
-  .union([z.string(), z.null(), z.undefined()])
+  .union([z.string(), z.null()])
+  .optional()
   .transform((v, ctx) => {
     if (!v || v.trim() === '') return null;
     const s = v.trim().slice(0, 10);
@@ -234,7 +245,8 @@ export const contactCreateSchema = z.object({
   title: optionalText(160),
   phone: optionalText(60),
   phoneAlt: optionalText(60),
-  email: z.union([z.string().trim().email('Must be a valid email address.'), z.literal(''), z.null(), z.undefined()])
+  email: z.union([z.string().trim().email('Must be a valid email address.'), z.literal(''), z.null()])
+    .optional()
     .transform((v) => (v ? v : null)),
   notes: optionalText(8000),
   source: optionalText(240),

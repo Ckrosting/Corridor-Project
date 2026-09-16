@@ -16,7 +16,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function MarketPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePageUser();
+  const actor = await requirePageUser();
   const { id } = await params;
 
   try {
@@ -29,6 +29,7 @@ export default async function MarketPage({ params }: { params: Promise<{ id: str
         properties={w.properties}
         parcels={w.parcels}
         statuses={w.statuses}
+        isAdmin={actor.role === 'admin'}
       />
     );
   } catch (err) {
