@@ -113,7 +113,7 @@ export default async function MapSettingsPage() {
             <div className="card-header"><h2 className="card-title">Boundary accuracy</h2></div>
             <div className="p-4 text-xs leading-relaxed text-ink-600">
               <p>
-                Corridor boundaries and parcel outlines drawn in this application are
+                Parcel outlines drawn in this application are
                 <strong> approximate research outlines</strong>. They are not surveyed lines and not
                 official tax parcel boundaries, and are labelled as such wherever they appear.
                 County GIS integration and parcel-map uploads are deliberately out of scope for this

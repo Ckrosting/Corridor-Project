@@ -53,7 +53,6 @@ export default async function DiscoveryPage({
       <DiscoveryInbox
         results={results.map((r) => ({
           ...r.r,
-          corridorName: r.corridorName,
           marketName: r.marketName,
           suggestedPropertyName: r.suggestedPropertyName,
         }))}

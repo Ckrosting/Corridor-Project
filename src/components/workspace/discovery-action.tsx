@@ -16,11 +16,10 @@ import { Spinner } from '@/components/ui/primitives';
  * discovery inbox for review — none writes a property record directly.
  */
 export function DiscoveryAction({
-  corridorId, marketId, corridorName, aiConfigured,
+  marketId, marketName, aiConfigured,
 }: {
-  corridorId: string;
   marketId: string;
-  corridorName: string;
+  marketName: string;
   aiConfigured: boolean;
 }) {
   const router = useRouter();
@@ -31,6 +30,10 @@ export function DiscoveryAction({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
+  // A broker export covers a whole city, so the default is a trade-area radius
+  // around the mall rather than everything in the file.
+  const [radiusMiles, setRadiusMiles] = useState('5');
+  const [limitRadius, setLimitRadius] = useState(true);
 
   async function startScan() {
     setBusy(true);
@@ -40,9 +43,9 @@ export function DiscoveryAction({
       const res = await fetch('/api/scans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: 'corridor', corridorId }),
+        body: JSON.stringify({ scope: 'market', marketId }),
       });
-      const body = (await res.json().catch(() => ({}))) as { error?: string; corridorCount?: number };
+      const body = (await res.json().catch(() => ({}))) as { error?: string; marketCount?: number };
       if (!res.ok) throw new Error(body.error ?? 'The scan could not be started.');
 
       setMessage('Scan queued. It runs in the background — you can keep working, and results appear in the discovery inbox.');
@@ -62,7 +65,7 @@ export function DiscoveryAction({
       const res = await fetch('/api/discovery/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, corridorId, marketId }),
+        body: JSON.stringify({ url, marketId }),
       });
       const body = (await res.json().catch(() => ({}))) as {
         error?: string; notes?: string[]; staged?: { created: number; duplicates: number; suppressed: number };
@@ -87,7 +90,6 @@ export function DiscoveryAction({
     try {
       const form = new FormData();
       form.append('file', file);
-      form.append('corridorId', corridorId);
       form.append('marketId', marketId);
 
       const res = await fetch('/api/discovery/submit', { method: 'POST', body: form });
@@ -113,18 +115,24 @@ export function DiscoveryAction({
     try {
       const form = new FormData();
       form.append('file', file);
-      form.append('corridorId', corridorId);
       form.append('marketId', marketId);
+      if (limitRadius) form.append('radiusMiles', radiusMiles);
 
       const res = await fetch('/api/discovery/import-csv', { method: 'POST', body: form });
       const body = (await res.json().catch(() => ({}))) as {
         error?: string;
         staged?: { created: number; duplicates: number; suppressed: number };
         errors?: Array<{ rowNumber: number; message: string }>;
+        notes?: string[];
       };
       if (!res.ok) throw new Error(body.error ?? 'That file could not be read.');
 
-      setNotes((body.errors ?? []).map((e) => `Row ${e.rowNumber}: ${e.message}`));
+      // Unrecognised-column notes come first: they apply to every row, so they
+      // matter more than any single row's problem.
+      setNotes([
+        ...(body.notes ?? []),
+        ...(body.errors ?? []).map((e) => `Row ${e.rowNumber}: ${e.message}`),
+      ]);
       setMessage(describe(body.staged));
       router.refresh();
     } catch (err) {
@@ -157,7 +165,7 @@ export function DiscoveryAction({
       <div className="card w-full max-w-lg">
         <div className="card-header">
           <h2 className="card-title flex items-center gap-1.5">
-            <Search size={15} /> Find listings in {corridorName}
+            <Search size={15} /> Find listings in {marketName}
           </h2>
           <button
             type="button" className="btn-ghost btn-sm" aria-label="Close"
@@ -172,7 +180,7 @@ export function DiscoveryAction({
             ['scan', 'Search the web'],
             ['url', 'Add a listing URL'],
             ['file', 'Upload a flyer / OM'],
-            ['csv', 'Import candidates CSV'],
+            ['csv', 'Import a listings export'],
           ] as const).map(([key, label]) => (
             <button
               key={key} type="button" onClick={() => { setTab(key); setError(null); setMessage(null); }}
@@ -201,7 +209,7 @@ export function DiscoveryAction({
             <>
               <p className="text-xs leading-relaxed text-ink-600">
                 Searches publicly accessible listing sources for any property type offered for sale
-                in this corridor, with no price restriction. Results are staged in the discovery
+                in this market, with no price restriction. Results are staged in the discovery
                 inbox for your review — nothing is added to the map automatically.
               </p>
               <div className="banner-info">
@@ -256,10 +264,31 @@ export function DiscoveryAction({
           {tab === 'csv' && (
             <>
               <p className="text-xs leading-relaxed text-ink-600">
-                For candidates found outside the app - by hand, or by a research task that does its
-                own web searching. This calls no AI model and costs nothing; it stages rows straight
-                into the discovery inbox under the same review rules as a real scan.
+                For listings found outside the app - a broker inventory export (Crexi and similar,
+                as downloaded), or rows assembled by hand. This calls no AI model and costs nothing;
+                it stages rows straight into the discovery inbox under the same review rules as a
+                real scan.
               </p>
+
+              <div className="space-y-1.5 rounded-lg border border-ink-200 p-2.5">
+                <label className="flex items-center gap-2 text-xs font-medium text-ink-800">
+                  <input
+                    type="checkbox" checked={limitRadius} disabled={busy}
+                    onChange={(e) => setLimitRadius(e.target.checked)}
+                  />
+                  Only import listings within
+                  <input
+                    className="input w-16 py-0.5 text-xs" inputMode="decimal" value={radiusMiles}
+                    disabled={busy || !limitRadius} onChange={(e) => setRadiusMiles(e.target.value)}
+                  />
+                  miles of the mall
+                </label>
+                <p className="field-hint">
+                  {limitRadius
+                    ? 'A city-wide export is mostly listings nowhere near this market. Rows with no coordinates are imported anyway rather than dropped, and the count skipped is reported.'
+                    : 'Every row in the file will be imported, however far from the mall it is.'}
+                </p>
+              </div>
               <a
                 href="/api/export/candidate-template"
                 className="btn-secondary btn-sm w-full justify-center"
@@ -268,9 +297,9 @@ export function DiscoveryAction({
               </a>
               <label className="flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 border-dashed border-ink-300 px-4 py-6 text-center hover:border-accent-500 hover:bg-accent-50">
                 <FileSpreadsheet size={20} className="text-ink-400" />
-                <span className="text-xs font-medium text-ink-800">Choose a CSV file</span>
+                <span className="text-xs font-medium text-ink-800">Choose a CSV or Excel file</span>
                 <input
-                  type="file" accept=".csv,text/csv" className="hidden" disabled={busy}
+                  type="file" accept=".csv,.xlsx,.xlsm,text/csv" className="hidden" disabled={busy}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) void submitCsv(f); e.target.value = ''; }}
                 />
               </label>
@@ -290,7 +319,7 @@ export function DiscoveryAction({
           {notes.length > 0 && (
             <div className="banner-warn">
               <span>
-                <strong>Coverage notes:</strong>
+                <strong>Notes:</strong>
                 <ul className="mt-1 space-y-0.5">
                   {notes.slice(0, 6).map((n, i) => <li key={i}>• {n}</li>)}
                 </ul>

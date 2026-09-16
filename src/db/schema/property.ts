@@ -5,7 +5,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { AreaGeometry } from '@/lib/geo/types';
 import { users } from './auth';
-import { corridors, markets } from './geo';
+import { markets } from './geo';
 import {
   contactRoleEnum, customFieldTypeEnum, geometrySourceEnum, listingStatusEnum,
 } from './enums';
@@ -205,26 +205,6 @@ export const properties = pgTable(
     index('properties_archived_idx').on(t.archivedAt),
     index('properties_sample_idx').on(t.isSample),
     index('properties_address_idx').on(sql`lower(${t.addressLine1})`),
-  ],
-);
-
-/**
- * Membership of a property in a corridor. Many-to-many on purpose: a property
- * that sits inside three overlapping corridors is ONE row in `properties` with
- * three rows here. Its contacts, notes and call history are never duplicated.
- */
-export const propertyCorridors = pgTable(
-  'property_corridors',
-  {
-    propertyId: uuid('property_id').notNull().references(() => properties.id, { onDelete: 'cascade' }),
-    corridorId: uuid('corridor_id').notNull().references(() => corridors.id, { onDelete: 'cascade' }),
-    /** 'auto' when derived from geometry, 'manual' when a user pinned it. */
-    assignedVia: text('assigned_via').notNull().default('auto'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.propertyId, t.corridorId] }),
-    index('property_corridors_corridor_idx').on(t.corridorId),
   ],
 );
 

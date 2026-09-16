@@ -17,7 +17,7 @@ export const GET = route(async (_req: Request, ctx: Ctx) => {
   return ok(await getScanDetail(id));
 });
 
-/** Requests cancellation. A running scan stops at its next corridor boundary. */
+/** Requests cancellation. A running scan stops at its next market boundary. */
 export const DELETE = route(async (_req: Request, ctx: Ctx) => {
   const actor = await requireUser();
   const { id } = await ctx.params;

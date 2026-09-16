@@ -39,7 +39,7 @@ Consequences:
 - [x] Git repository, TypeScript, Next.js 15, React 19
 - [x] Local PostgreSQL 17.10 without Docker or admin rights
 - [x] Drizzle ORM + drizzle-kit migrations
-- [x] Full schema: 34 tables, 16 enums
+- [x] Full schema: 32 tables, 14 enums
 - [x] `.env.example` with no secrets; `npm run setup` one-shot bootstrap
 - [x] Vitest configured
 - [x] Geometry library — 25 tests
@@ -51,15 +51,15 @@ Consequences:
 - [x] Dev sign-in shortcut, structurally absent from production builds
 - [x] Server-side authorization guards (`requireUser`, `requireAdmin`)
 - [x] Optimistic concurrency (version tokens) + append-only audit log
-- [x] Markets, mall anchors, corridors (radius seed + freehand redraw)
+- [x] Markets and mall anchors
 - [x] Properties with every specified field; unknown never stored as zero
-- [x] Parcels: multiple per property, optional geometry, persistent edits
-- [x] Corridor membership: many-to-many, recomputed, manual pins preserved
+- [x] Parcels: multiple per property, optional geometry, drawn/edited in the
+      market workspace, persistent edits
 - [x] Shared contacts + owner entities kept separate
 - [x] Activity timeline and fast call logging
 - [x] Follow-up queues (overdue / today / upcoming / unscheduled)
 - [x] Leaflet map: basemaps, draw/edit, filters, fit-to-bounds, preserved viewport
-- [x] Corridor workspace, market workspace, property detail, portfolio dashboard
+- [x] Market workspace, property detail, portfolio dashboard
 - [x] Properties list, contacts list/detail, follow-ups screen
 - [x] Seed: default statuses/stages + clearly-labelled sample data
 
@@ -92,7 +92,7 @@ during implementation: `claude-sonnet-5` is the current Sonnet-family model, and
 - [x] Structured, Zod-validated extraction with field-level sources
 - [x] Two-phase design: research with search, then extraction with no tools
 - [x] Prompt-injection defence — retrieved content delimited and treated as data
-- [x] Corridor-scoped search with honest coverage reporting
+- [x] Market-scoped (and portfolio-wide "all") search with honest coverage reporting
 - [x] Background worker: claim / heartbeat / retry / backoff / cancel / concurrency /
       graceful shutdown
 - [x] Scan states: queued / running / completed / partial / cancelled / failed
@@ -100,7 +100,7 @@ during implementation: `claude-sonnet-5` is the current Sonnet-family model, and
 - [x] Discovery inbox: review, correct, approve, link, reject, needs-research
 - [x] Proposed-change review — never a silent overwrite
 - [x] Manual "add listing URL" and "upload flyer/OM" through the same pipeline
-- [x] Budget ceiling enforced at queue time **and** re-checked between corridors
+- [x] Budget ceiling enforced at queue time **and** re-checked between markets
 - [x] Recorded usage with clearly-labelled cost estimates
 
 ## Phase 4 — Production readiness
@@ -121,10 +121,9 @@ during implementation: `claude-sonnet-5` is the current Sonnet-family model, and
 
 **99 tests passing.** Detail in [TEST_RESULTS.md](TEST_RESULTS.md).
 
-- [x] Corridor and parcel geometry validation (25 unit tests)
-- [x] Parcel and corridor persistence at the database level
+- [x] Parcel geometry validation (25 unit tests)
+- [x] Parcel persistence at the database level
 - [x] Multiple parcels on one property, including a parcel ID with no geometry
-- [x] One property in overlapping corridors without duplication
 - [x] Call history and follow-up persistence
 - [x] Call history survives outreach status changes
 - [x] Explicit opportunity promotion (reason, date, author)
@@ -156,7 +155,8 @@ Highest-value next steps, in order:
 
 1. **Load the real mall spreadsheet** through Settings → Import & export. That
    exercises the import path with real data and populates the markets.
-2. **Add an `ANTHROPIC_API_KEY`** and run one corridor scan. Expect prompt tuning;
-   the budget ceiling and per-scan search limit bound the cost of finding out.
+2. **Add an `ANTHROPIC_API_KEY`** and run one discovery scan. Expect prompt
+   tuning; the budget ceiling and per-scan search limit bound the cost of
+   finding out.
 3. **Finish the attachment upload control** on the property screen.
 4. **Deploy to Railway** following [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md).

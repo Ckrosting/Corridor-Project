@@ -81,8 +81,8 @@ export default async function PropertiesPage({
           <EmptyState
             icon={<Building2 size={26} />}
             title="No properties match"
-            body="Adjust the filters above, or add a property from a corridor workspace where you can place it on the map."
-            action={<Link href="/markets" className="btn-primary btn-sm">Open a corridor</Link>}
+            body="Adjust the filters above, or add a property from a market workspace where you can place it on the map."
+            action={<Link href="/markets" className="btn-primary btn-sm">Open a market</Link>}
           />
         ) : (
           <table className="table-dense">

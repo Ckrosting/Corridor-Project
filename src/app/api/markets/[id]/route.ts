@@ -33,10 +33,10 @@ export const PATCH = route(async (req: Request, ctx: Ctx) => {
 });
 
 /**
- * Archive rather than delete, so corridors, properties and their history under
- * this market survive and can be recovered. Corridors and mall anchors under an
+ * Archive rather than delete, so properties and their history under
+ * this market survive and can be recovered. Mall anchors under an
  * archived market are not separately archived - they simply become unreachable
- * through market navigation, matching how a corridor's own delete works.
+ * through market navigation.
  */
 export const DELETE = route(async (_req: Request, ctx: Ctx) => {
   const actor = await requireAdmin();

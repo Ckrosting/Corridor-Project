@@ -54,7 +54,6 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   const followUp = relativeDays(property.nextFollowUpDate);
   const activeOpportunity = property.opportunities.find((o) => o.state === 'active');
   const calls = property.timeline.filter((t) => t.type !== 'status_change');
-  const primaryCorridor = property.corridors[0];
 
   return (
     <>
@@ -65,11 +64,11 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
               <Link href="/properties" className="flex items-center gap-1 hover:text-accent-700">
                 <ArrowLeft size={12} /> Properties
               </Link>
-              {primaryCorridor && (
+              {property.market && (
                 <>
                   <span className="text-ink-300">/</span>
-                  <Link href={`/corridors/${primaryCorridor.id}`} className="hover:text-accent-700">
-                    {primaryCorridor.name}
+                  <Link href={`/markets/${property.market.id}`} className="hover:text-accent-700">
+                    {property.market.name}
                   </Link>
                 </>
               )}
@@ -86,7 +85,6 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
                 label={LISTING_STATUS_LABELS[property.listingStatus] ?? property.listingStatus}
                 color={property.listingStatus === 'for_sale' ? '#15803d' : '#64748b'}
               />
-              {property.corridors.map((c) => <StatusChip key={c.id} label={c.name} color={c.color} />)}
               {property.tags.map((t) => <StatusChip key={t.id} label={t.name} color={t.color} />)}
               {property.needsParcelOutline && (
                 <span className="chip border-amber-300 bg-amber-50 text-amber-800">Needs parcel outline</span>
@@ -95,8 +93,8 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-2">
-            {primaryCorridor && (
-              <Link href={`/corridors/${primaryCorridor.id}`} className="btn-secondary btn-sm">
+            {property.market && (
+              <Link href={`/markets/${property.market.id}`} className="btn-secondary btn-sm">
                 Open on map <ExternalLink size={12} />
               </Link>
             )}
@@ -199,7 +197,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
                 {property.timeline.length === 0 ? (
                   <EmptyState
                     title="No activity yet"
-                    body="Log calls from the corridor map panel, where the owner and broker numbers are one click away."
+                    body="Log calls from the market map panel, where the owner and broker numbers are one click away."
                   />
                 ) : (
                   <ol className="space-y-3">
@@ -298,7 +296,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
 
                 {property.parcels.length === 0 ? (
                   <p className="text-xs text-ink-500">
-                    No parcels recorded. Open the corridor map and use Draw parcel to outline it.
+                    No parcels recorded. Open the market map and use Draw parcel to outline it.
                   </p>
                 ) : (
                   property.parcels.map((p) => (

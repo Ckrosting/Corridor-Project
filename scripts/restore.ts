@@ -20,8 +20,8 @@ import postgres from 'postgres';
 
 const TABLE_ORDER = [
   'users', 'app_settings', 'outreach_statuses', 'transaction_stages',
-  'custom_field_defs', 'tags', 'markets', 'mall_anchors', 'corridors',
-  'owner_entities', 'contacts', 'properties', 'property_corridors',
+  'custom_field_defs', 'tags', 'markets', 'mall_anchors',
+  'owner_entities', 'contacts', 'properties',
   'property_parcels', 'property_contacts', 'property_listing_sources',
   'property_price_history', 'property_tags', 'custom_field_values', 'activities',
   'opportunities', 'opportunity_properties', 'opportunity_stage_history',

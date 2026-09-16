@@ -22,6 +22,27 @@
       "when": 1789497102057,
       "tag": "0002_busy_runaways",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789565988938,
+      "tag": "0003_drop_corridors",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789566001077,
+      "tag": "0004_market_scan_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789573451492,
+      "tag": "0005_wise_zzzax",
+      "breakpoints": true
     }
   ]
 }

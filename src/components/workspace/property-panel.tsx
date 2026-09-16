@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  Camera, Check, Copy, ExternalLink, Mail, MapPin, Phone, Squircle, TrendingUp, X,
+  Camera, Check, Copy, ExternalLink, Mail, MapPin, Phone, Squircle, Trash2, TrendingUp, X,
 } from 'lucide-react';
 import {
   ACTIVITY_TYPE_LABELS, CALL_OUTCOME_LABELS, CONTACT_ROLE_LABELS, LISTING_STATUS_LABELS,
@@ -57,7 +57,6 @@ interface PropertyDetailData {
     relationship: string;
     isPrimary: boolean;
   }>;
-  corridors: Array<{ id: string; name: string; color: string; assignedVia: string }>;
   tags: Array<{ id: string; name: string; color: string }>;
   timeline: Array<{
     id: string; type: string; outcome: string | null; subject: string | null; notes: string | null;
@@ -74,13 +73,14 @@ type Tab = 'overview' | 'calls' | 'contacts' | 'financial' | 'parcels';
  * The property side panel.
  *
  * Opening it never moves the map — the parent keeps its viewport — so the user
- * does not lose their place while working a corridor.
+ * does not lose their place while working a market.
  */
 export function PropertyPanel({
-  propertyId, statuses, onClose, onChanged, onZoomToProperty,
+  propertyId, statuses, isAdmin, onClose, onChanged, onZoomToProperty,
 }: {
   propertyId: string;
   statuses: OutreachStatusOption[];
+  isAdmin: boolean;
   onClose(): void;
   onChanged(): void;
   onZoomToProperty(): void;
@@ -91,6 +91,9 @@ export function PropertyPanel({
   const [tab, setTab] = useState<Tab>('overview');
   const [copied, setCopied] = useState<string | null>(null);
   const [promoting, setPromoting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,6 +111,22 @@ export function PropertyPanel({
   }, [propertyId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  async function deleteProperty() {
+    if (!data) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/properties/${data.id}?version=${data.version}`, { method: 'DELETE' });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not delete this property.');
+      onChanged();
+      onClose();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Could not delete this property.');
+      setDeleting(false);
+    }
+  }
 
   async function copy(value: string, key: string) {
     try {
@@ -197,9 +216,47 @@ export function PropertyPanel({
           <Link href={`/properties/${data.id}`} className="btn-ghost btn-sm" title="Open the full detail view">
             <ExternalLink size={13} /> Full view
           </Link>
+          {isAdmin && (
+            <button
+              type="button"
+              className="btn-ghost btn-sm text-red-600 hover:bg-red-50"
+              onClick={() => setConfirmingDelete(true)}
+              title="Delete this property"
+            >
+              <Trash2 size={13} /> Delete
+            </button>
+          )}
         </div>
       }
     >
+      {confirmingDelete && (
+        <div className="border-b border-ink-200 bg-red-50 p-3">
+          <p className="text-xs text-red-800">
+            Delete <span className="font-medium">{propertyTitle(data)}</span>? This removes it (and its
+            parcels, contacts, and activity history) from view. This can be undone by an admin, but not from here.
+          </p>
+          {deleteError && <div className="banner-error mt-2">{deleteError}</div>}
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              className="btn-danger btn-sm"
+              onClick={() => void deleteProperty()}
+              disabled={deleting}
+            >
+              {deleting ? <Spinner /> : <Trash2 size={13} />} Confirm delete
+            </button>
+            <button
+              type="button"
+              className="btn-ghost btn-sm"
+              onClick={() => { setConfirmingDelete(false); setDeleteError(null); }}
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ------------------------------------------------------------ Tabs */}
       <div className="flex shrink-0 gap-0.5 border-b border-ink-200 px-3">
         {TABS.map(([key, label, count]) => (
@@ -255,27 +312,6 @@ export function PropertyPanel({
             {data.tenantInfo && (
               <Field label="Tenants"><p className="whitespace-pre-wrap">{data.tenantInfo}</p></Field>
             )}
-
-            <div>
-              <SectionHeading>Corridors</SectionHeading>
-              {data.corridors.length === 0 ? (
-                <p className="text-xs text-ink-500">Not inside any saved corridor boundary.</p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {data.corridors.map((c) => (
-                    <StatusChip
-                      key={c.id} label={c.name} color={c.color}
-                      title={c.assignedVia === 'manual' ? 'Manually assigned' : 'Inside this corridor boundary'}
-                    />
-                  ))}
-                </div>
-              )}
-              {data.corridors.length > 1 && (
-                <p className="field-hint">
-                  This is one record shown in {data.corridors.length} overlapping corridors — not a duplicate.
-                </p>
-              )}
-            </div>
 
             {data.researchNotes && (
               <Field label="Research notes">

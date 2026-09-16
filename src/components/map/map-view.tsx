@@ -30,13 +30,6 @@ export interface MapParcel {
   propertyTitle?: string | null;
 }
 
-export interface MapCorridor {
-  id: string;
-  name: string;
-  color: string;
-  boundary: AreaGeometry | null;
-}
-
 export interface MapAnchor {
   id: string;
   name: string;
@@ -44,18 +37,7 @@ export interface MapAnchor {
   longitude: number | null;
 }
 
-export type DrawMode = 'none' | 'corridor' | 'parcel' | 'point';
-
-/**
- * Shifts a Leaflet polygon's latlngs (which nest arbitrarily deep - a simple
- * ring, a ring-with-holes, or a multipolygon) by a fixed lat/lng delta.
- * Recurses until it finds actual L.LatLng leaves.
- */
-function translateLatLngs(latlngs: unknown, dLat: number, dLng: number): unknown {
-  if (Array.isArray(latlngs)) return latlngs.map((v) => translateLatLngs(v, dLat, dLng));
-  const ll = latlngs as L.LatLng;
-  return L.latLng(ll.lat + dLat, ll.lng + dLng);
-}
+export type DrawMode = 'none' | 'parcel' | 'point';
 
 export interface MapViewHandle {
   fitTo(geometry: AreaGeometry): void;
@@ -63,44 +45,37 @@ export interface MapViewHandle {
   panTo(point: LatLng, zoom?: number): void;
   /** Current viewport, used to persist map position across navigation. */
   getView(): { center: LatLng; zoom: number } | null;
-  /** Puts an existing corridor boundary into edit mode. */
-  editCorridor(corridorId: string): void;
   cancelEditing(): void;
 }
 
 export interface MapViewProps {
   properties: MapProperty[];
   parcels: MapParcel[];
-  corridors: MapCorridor[];
   anchors: MapAnchor[];
   selectedPropertyId: string | null;
-  /** Corridor whose boundary is highlighted and editable. */
-  activeCorridorId: string | null;
   drawMode: DrawMode;
   initialView?: { center: LatLng; zoom: number } | null;
   /**
    * Fitted once on mount when there is no remembered viewport, so opening a
-   * corridor for the first time lands on the corridor rather than on a default
+   * market for the first time lands on its properties rather than on a default
    * continental view. A remembered viewport always wins - returning to a
    * workspace must not throw away where the user was.
    */
   initialFit?: AreaGeometry | null;
-  /** Used instead of `initialFit` when there is no boundary to fit to - e.g. a market with no corridors yet, centred on its mall anchor. */
+  /** Used instead of `initialFit` when there is no geometry to fit to - e.g. a market with no parcels yet, centred on its mall anchor. */
   initialCenter?: { point: LatLng; zoom: number } | null;
   ref?: React.Ref<MapViewHandle>;
 
   onSelectProperty(id: string | null): void;
   onViewChange?(view: { center: LatLng; zoom: number }): void;
-  /** Fires when the user finishes drawing a new shape. */
-  onShapeDrawn(mode: 'corridor' | 'parcel', geometry: AreaGeometry): void;
-  /** Fires when an existing corridor boundary is edited. */
-  onCorridorEdited(corridorId: string, geometry: AreaGeometry): void;
+  /** Fires when the user finishes drawing a new parcel outline. */
+  onShapeDrawn(geometry: AreaGeometry): void;
   /** Fires when an existing parcel boundary is edited. */
   onParcelEdited(parcelId: string, geometry: AreaGeometry): void;
   /** Fires when the user clicks the map in 'point' mode (placing a property). */
   onPointPlaced?(point: LatLng): void;
   /** Fires when a property marker is dragged to a new spot. */
-  onPropertyMoved?(propertyId: string, point: LatLng): void;
+  onPropertyMoved?(propertyId: string, point: LatLng, staleParcelIds: string[]): void;
 }
 
 /**
@@ -115,36 +90,35 @@ export interface MapViewProps {
  * at import time. It is loaded through a dynamic import with ssr:false.
  */
 export function MapView({
-  properties, parcels, corridors, anchors, selectedPropertyId, activeCorridorId,
+  properties, parcels, anchors, selectedPropertyId,
   drawMode, initialView, initialFit, initialCenter, ref,
-  onSelectProperty, onViewChange, onShapeDrawn, onCorridorEdited, onParcelEdited, onPointPlaced, onPropertyMoved,
+  onSelectProperty, onViewChange, onShapeDrawn, onParcelEdited, onPointPlaced, onPropertyMoved,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
 
   const propertyLayerRef = useRef<L.LayerGroup | null>(null);
   const parcelLayerRef = useRef<L.LayerGroup | null>(null);
-  const corridorLayerRef = useRef<L.LayerGroup | null>(null);
   const anchorLayerRef = useRef<L.LayerGroup | null>(null);
   const highlightLayerRef = useRef<L.LayerGroup | null>(null);
 
   const markersRef = useRef(new Map<string, L.Marker>());
   const parcelShapesRef = useRef(new Map<string, L.Polygon>());
-  const corridorShapesRef = useRef(new Map<string, L.Polygon>());
   const highlightShapeRef = useRef<L.CircleMarker | null>(null);
   const selectedPropertyIdRef = useRef<string | null>(selectedPropertyId);
   selectedPropertyIdRef.current = selectedPropertyId;
   const parcelsRef = useRef(parcels);
   parcelsRef.current = parcels;
   // While a marker with its own (non-authoritative) parcel outline is being
-  // dragged, this holds enough to translate that outline live: the marker's
-  // position when the drag started, and each affected parcel's shape and its
-  // starting latlngs, so every frame can recompute "original + delta" rather
-  // than drifting from repeated small nudges.
+  // dragged, this holds enough to move that outline's on-screen position live
+  // (a cheap CSS transform, not a real geometry change - see the `drag`
+  // handler below): the marker's position when the drag started, and each
+  // affected parcel's shape. The shapes themselves are discarded at drop
+  // rather than saved in their dragged position - see `dragend`.
   const parcelDragRef = useRef<{
     propertyId: string;
     markerStart: L.LatLng;
-    parcels: Array<{ id: string; shape: L.Polygon; originalLatLngs: unknown }>;
+    parcels: Array<{ id: string; shape: L.Polygon }>;
   } | null>(null);
 
   const [basemaps] = useState(() => getBasemaps());
@@ -152,8 +126,8 @@ export function MapView({
 
   // Callbacks are held in a ref so the map is created exactly once; otherwise a
   // parent re-render would tear down and rebuild the whole map.
-  const handlers = useRef({ onSelectProperty, onViewChange, onShapeDrawn, onCorridorEdited, onParcelEdited, onPointPlaced, onPropertyMoved });
-  handlers.current = { onSelectProperty, onViewChange, onShapeDrawn, onCorridorEdited, onParcelEdited, onPointPlaced, onPropertyMoved };
+  const handlers = useRef({ onSelectProperty, onViewChange, onShapeDrawn, onParcelEdited, onPointPlaced, onPropertyMoved });
+  handlers.current = { onSelectProperty, onViewChange, onShapeDrawn, onParcelEdited, onPointPlaced, onPropertyMoved };
 
   /* ------------------------------------------------------------- Map setup */
 
@@ -194,7 +168,6 @@ export function MapView({
       pane: 'overlayPane',
     }).addTo(map);
 
-    corridorLayerRef.current = L.layerGroup().addTo(map);
     parcelLayerRef.current = L.layerGroup().addTo(map);
     highlightLayerRef.current = L.layerGroup().addTo(map);
     anchorLayerRef.current = L.layerGroup().addTo(map);
@@ -211,16 +184,13 @@ export function MapView({
 
     map.on('pm:create', (e) => {
       const layer = e.layer as L.Polygon;
-      const mode = (layer.options as { pmDrawMode?: 'corridor' | 'parcel' }).pmDrawMode
-        ?? (map as unknown as { __hcDrawMode?: 'corridor' | 'parcel' }).__hcDrawMode;
-
       try {
         const geometry = leafletLatLngsToGeometry(layer.getLatLngs() as never);
         // The drawn layer is discarded; the parent re-renders it from saved state
         // once the server has accepted it. This guarantees the map always shows
         // persisted geometry rather than an optimistic local shape.
         map.removeLayer(layer);
-        if (mode) handlers.current.onShapeDrawn(mode, geometry);
+        handlers.current.onShapeDrawn(geometry);
       } catch (err) {
         map.removeLayer(layer);
         console.error('[map] could not convert drawn shape', err);
@@ -266,7 +236,6 @@ export function MapView({
       mapRef.current = null;
       markersRef.current.clear();
       parcelShapesRef.current.clear();
-      corridorShapesRef.current.clear();
     };
     // Intentionally one-time setup.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -281,76 +250,19 @@ export function MapView({
     (map as unknown as { __hcDrawMode?: DrawMode }).__hcDrawMode = drawMode;
     map.pm.disableDraw();
 
-    if (drawMode === 'corridor' || drawMode === 'parcel') {
+    if (drawMode === 'parcel') {
       map.pm.enableDraw('Polygon', {
         snappable: true,
         snapDistance: 15,
         finishOn: 'dblclick',
-        templineStyle: { color: drawMode === 'corridor' ? '#7c3aed' : '#2563eb', weight: 2 },
-        hintlineStyle: { color: drawMode === 'corridor' ? '#7c3aed' : '#2563eb', weight: 2, dashArray: '4,4' },
-        pathOptions: {
-          color: drawMode === 'corridor' ? '#7c3aed' : '#2563eb',
-          fillOpacity: 0.12,
-          weight: 2,
-        },
+        templineStyle: { color: '#2563eb', weight: 2 },
+        hintlineStyle: { color: '#2563eb', weight: 2, dashArray: '4,4' },
+        pathOptions: { color: '#2563eb', fillOpacity: 0.12, weight: 2 },
       });
     }
 
     map.getContainer().style.cursor = drawMode === 'point' ? 'crosshair' : '';
   }, [drawMode, ready]);
-
-  /* ------------------------------------------------------------- Corridors */
-
-  useEffect(() => {
-    const group = corridorLayerRef.current;
-    if (!group || !ready) return;
-
-    const seen = new Set<string>();
-
-    for (const corridor of corridors) {
-      if (!corridor.boundary) continue;
-      seen.add(corridor.id);
-
-      const isActive = corridor.id === activeCorridorId;
-      const style: L.PathOptions = {
-        color: corridor.color,
-        weight: isActive ? 3 : 2,
-        opacity: isActive ? 1 : 0.65,
-        fillColor: corridor.color,
-        fillOpacity: isActive ? 0.08 : 0.04,
-        dashArray: isActive ? undefined : '6,4',
-        interactive: false,
-      };
-
-      const existing = corridorShapesRef.current.get(corridor.id);
-      const latlngs = geometryToLeafletLatLngs(corridor.boundary);
-
-      if (existing) {
-        existing.setLatLngs(latlngs as never);
-        existing.setStyle(style);
-      } else {
-        const poly = L.polygon(latlngs as never, style);
-        poly.bindTooltip(corridor.name, { sticky: true, direction: 'top' });
-        poly.on('pm:update', (e) => {
-          try {
-            const geometry = leafletLatLngsToGeometry((e.layer as L.Polygon).getLatLngs() as never);
-            handlers.current.onCorridorEdited(corridor.id, geometry);
-          } catch (err) {
-            console.error('[map] invalid corridor edit', err);
-          }
-        });
-        poly.addTo(group);
-        corridorShapesRef.current.set(corridor.id, poly);
-      }
-    }
-
-    for (const [id, layer] of corridorShapesRef.current) {
-      if (!seen.has(id)) {
-        group.removeLayer(layer);
-        corridorShapesRef.current.delete(id);
-      }
-    }
-  }, [corridors, activeCorridorId, ready]);
 
   /* --------------------------------------------------------------- Parcels */
 
@@ -533,10 +445,10 @@ export function MapView({
           const movable = parcelsRef.current.filter((p) => (
             p.propertyId === property.id && p.geometry && p.geometrySource !== 'county_gis'
           ));
-          const draggedParcels: Array<{ id: string; shape: L.Polygon; originalLatLngs: unknown }> = [];
+          const draggedParcels: Array<{ id: string; shape: L.Polygon }> = [];
           for (const p of movable) {
             const shape = parcelShapesRef.current.get(p.id);
-            if (shape) draggedParcels.push({ id: p.id, shape, originalLatLngs: shape.getLatLngs() });
+            if (shape) draggedParcels.push({ id: p.id, shape });
           }
           parcelDragRef.current = { propertyId: property.id, markerStart: marker.getLatLng(), parcels: draggedParcels };
         });
@@ -569,27 +481,26 @@ export function MapView({
         });
         marker.on('dragend', () => {
           const { lat, lng } = marker.getLatLng();
-          handlers.current.onPropertyMoved?.(property.id, { lat, lng });
 
+          // The parcel this property had before the drag describes a specific
+          // piece of ground - it was either right where the pin used to sit,
+          // or (per the user's own report) already wrong. Either way, sliding
+          // that same shape over by the drag distance cannot be correct at
+          // the new spot, so it is discarded rather than translated; the
+          // server re-traces or re-matches a fresh parcel at the new point,
+          // the same auto-match a brand-new property gets.
           const drag = parcelDragRef.current;
+          const staleParcelIds: string[] = [];
           if (drag && drag.propertyId === property.id) {
-            const cur = marker.getLatLng();
-            const dLat = cur.lat - drag.markerStart.lat;
-            const dLng = cur.lng - drag.markerStart.lng;
             for (const p of drag.parcels) {
               const el = p.shape.getElement() as SVGGraphicsElement | null;
               if (el) el.style.transform = '';
-              try {
-                const translated = translateLatLngs(p.originalLatLngs, dLat, dLng);
-                p.shape.setLatLngs(translated as never);
-                const geometry = leafletLatLngsToGeometry(p.shape.getLatLngs() as never);
-                handlers.current.onParcelEdited(p.id, geometry);
-              } catch (err) {
-                console.error('[map] could not save translated parcel', err);
-              }
+              staleParcelIds.push(p.id);
             }
           }
           parcelDragRef.current = null;
+
+          handlers.current.onPropertyMoved?.(property.id, { lat, lng }, staleParcelIds);
         });
         marker.addTo(group);
         markersRef.current.set(property.id, marker);
@@ -627,18 +538,7 @@ export function MapView({
       const c = map.getCenter();
       return { center: { lat: c.lat, lng: c.lng }, zoom: map.getZoom() };
     },
-    editCorridor(corridorId) {
-      corridorShapesRef.current.forEach((layer, id) => {
-        if (id === corridorId) {
-          layer.options.interactive = true;
-          layer.pm.enable({ allowSelfIntersection: false, snappable: true });
-        } else {
-          layer.pm.disable();
-        }
-      });
-    },
     cancelEditing() {
-      corridorShapesRef.current.forEach((l) => l.pm.disable());
       parcelShapesRef.current.forEach((l) => l.pm.disable());
       mapRef.current?.pm.disableDraw();
     },

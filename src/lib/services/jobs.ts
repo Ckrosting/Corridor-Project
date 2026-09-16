@@ -199,23 +199,8 @@ export async function getScanDetail(scanId: string) {
   if (!scan) throw new NotFoundError('Scan');
   const targets = await db.select().from(scanTargets)
     .where(eq(scanTargets.scanId, scanId))
-    .orderBy(scanTargets.corridorLabel);
+    .orderBy(scanTargets.marketLabel);
   return { scan, targets };
 }
 
-/** The most recent successful scan per corridor, for "last scanned" display. */
-export async function lastSuccessfulScanTimes(): Promise<Map<string, Date>> {
-  const rows = await db
-    .select({ corridorId: scanTargets.corridorId, finishedAt: scanTargets.finishedAt })
-    .from(scanTargets)
-    .where(and(eq(scanTargets.status, 'completed'), raw`${scanTargets.finishedAt} is not null`))
-    .orderBy(desc(scanTargets.finishedAt));
 
-  const map = new Map<string, Date>();
-  for (const row of rows) {
-    if (row.corridorId && row.finishedAt && !map.has(row.corridorId)) {
-      map.set(row.corridorId, row.finishedAt);
-    }
-  }
-  return map;
-}

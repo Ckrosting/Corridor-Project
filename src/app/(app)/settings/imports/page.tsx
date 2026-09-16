@@ -34,7 +34,7 @@ export default async function ImportsPage() {
             <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
               <ExportLink
                 href="/api/export/properties" label="Properties"
-                body="Every property with its market, parcel IDs and corridors."
+                body="Every property with its market and parcel IDs."
               />
               <ExportLink
                 href="/api/export/contacts" label="Contacts"
@@ -99,8 +99,7 @@ export default async function ImportsPage() {
               <p>
                 Latitude and longitude are optional. A mall imported without coordinates is kept and
                 flagged <strong>needs map placement</strong> rather than being dropped or given an
-                invented location, and corridor boundaries are never auto-created as if they were
-                confirmed.
+                invented location.
               </p>
             </div>
           </section>

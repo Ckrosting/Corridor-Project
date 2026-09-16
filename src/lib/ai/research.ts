@@ -3,7 +3,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { estimateCostUsd, getAnthropic, webSearchToolType, type CostRates } from './client';
 import {
-  EXTRACTION_PROMPT, GROUND_RULES, buildCorridorSearchPrompt,
+  EXTRACTION_PROMPT, GROUND_RULES, buildMarketSearchPrompt,
   buildDocumentExtractionPrompt, buildUrlExtractionPrompt, scanResultWireSchema,
   wireToScanResult, type ScanResult,
 } from './extraction';
@@ -127,11 +127,11 @@ async function extractStructured(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Corridor scan                                                              */
+/* Market scan                                                                */
 /* -------------------------------------------------------------------------- */
 
-export async function researchCorridor(
-  input: Parameters<typeof buildCorridorSearchPrompt>[0],
+export async function researchMarket(
+  input: Parameters<typeof buildMarketSearchPrompt>[0],
   rates: CostRates,
   signal?: AbortSignal,
 ): Promise<ResearchOutcome> {
@@ -152,7 +152,7 @@ export async function researchCorridor(
       max_tokens: env.ai.maxOutputTokens,
       system: GROUND_RULES,
       tools: [searchTool],
-      messages: [{ role: 'user', content: buildCorridorSearchPrompt(input) }],
+      messages: [{ role: 'user', content: buildMarketSearchPrompt(input) }],
     },
     { signal },
   );
@@ -176,7 +176,7 @@ export async function researchCorridor(
     // is diagnosable from the scan record alone, without re-running (and
     // re-paying for) a scan just to find out why.
     notes.push(
-      `The search returned no usable findings for this corridor `
+      `The search returned no usable findings for this market `
       + `(stop_reason: ${research.stop_reason ?? 'unknown'}, searches used: ${inspected.searches}/${env.ai.maxWebSearchesPerScan}).`
       + (research.stop_reason === 'max_tokens'
         ? ' The model ran out of its output budget mid-search before writing a final summary - raise AI_MAX_OUTPUT_TOKENS to give it more room.'

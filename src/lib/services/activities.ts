@@ -195,16 +195,12 @@ const selectFollowUpRow = {
  */
 export async function getFollowUps(
   bucket: FollowUpBucket,
-  opts: { marketId?: string; corridorId?: string; includeSample?: boolean; limit?: number } = {},
+  opts: { marketId?: string; includeSample?: boolean; limit?: number } = {},
 ) {
   const today = new Date().toISOString().slice(0, 10);
   const conds = [isNull(properties.archivedAt)];
   if (!opts.includeSample) conds.push(eq(properties.isSample, false));
   if (opts.marketId) conds.push(eq(properties.marketId, opts.marketId));
-  if (opts.corridorId) {
-    conds.push(raw`exists (select 1 from property_corridors pc
-      where pc.property_id = properties.id and pc.corridor_id = ${opts.corridorId})`);
-  }
 
   switch (bucket) {
     case 'overdue':

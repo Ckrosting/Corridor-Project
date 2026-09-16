@@ -122,44 +122,6 @@ export const mallAnchorUpdateSchema = mallAnchorCreateSchema.omit({ marketId: tr
 });
 
 /* -------------------------------------------------------------------------- */
-/* Corridors                                                                  */
-/* -------------------------------------------------------------------------- */
-
-export const corridorCreateSchema = z
-  .object({
-    marketId: uuid,
-    name: trimmed(160).min(1, 'Corridor name is required.'),
-    description: optionalText(4000),
-    color: hexColor.optional(),
-    anchorId: uuid.nullish(),
-    // Radius mode
-    centerLatitude: latitude.nullish(),
-    centerLongitude: longitude.nullish(),
-    radiusMeters: z.number().positive().max(200_000).nullish(),
-    // Custom mode
-    boundary: areaGeometrySchema.nullish(),
-  })
-  .refine(
-    (v) => v.boundary || (v.centerLatitude != null && v.centerLongitude != null && v.radiusMeters != null),
-    { message: 'Provide either a drawn boundary, or a centre point with a radius.' },
-  );
-
-export const corridorUpdateSchema = z.object({
-  name: trimmed(160).min(1).optional(),
-  description: optionalText(4000),
-  color: hexColor.optional(),
-  anchorId: uuid.nullish(),
-  centerLatitude: latitude.nullish(),
-  centerLongitude: longitude.nullish(),
-  radiusMeters: z.number().positive().max(200_000).nullish(),
-  boundary: areaGeometrySchema.nullish(),
-  /** Switching mode re-materialises the stored boundary from the chosen control. */
-  boundaryKind: z.enum(['radius', 'custom']).optional(),
-  sortOrder: z.number().int().optional(),
-  version: z.number().int().positive(),
-});
-
-/* -------------------------------------------------------------------------- */
 /* Properties                                                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -204,13 +166,11 @@ export const propertyFieldsSchema = z.object({
 export const propertyCreateSchema = propertyFieldsSchema.extend({
   marketId: uuid,
   tagIds: z.array(uuid).max(50).optional(),
-  corridorIds: z.array(uuid).max(50).optional(),
 });
 
 export const propertyUpdateSchema = propertyFieldsSchema.partial().extend({
   version: z.number().int().positive(),
   tagIds: z.array(uuid).max(50).optional(),
-  corridorIds: z.array(uuid).max(50).optional(),
   customFields: z.record(z.string(), z.unknown()).optional(),
 });
 

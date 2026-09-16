@@ -19,7 +19,6 @@ export const GET = route(async (req: Request) => {
 
   const filters: PropertyFilters = {
     marketId: sp.get('marketId') ?? undefined,
-    corridorId: sp.get('corridorId') ?? undefined,
     outreachStatusIds: list('outreachStatusId'),
     listingStatuses: list('listingStatus'),
     propertyTypes: list('propertyType'),

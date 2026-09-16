@@ -2,17 +2,15 @@ import '@/lib/server-guard';
 import { and, desc, eq, gte, inArray, isNull, or, sql as raw } from 'drizzle-orm';
 import { db } from '@/db';
 import {
-  aiUsage, contacts, corridors, discoveryResults, discoverySuppressions, markets,
+  aiUsage, contacts, discoveryResults, discoverySuppressions, markets,
   properties, propertyContacts, propertyListingSources, propertyParcels,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
 import { NotFoundError, ValidationError } from '@/lib/errors';
-import { classifyRelevance } from '@/lib/geo/polygon';
 import type { Candidate } from '@/lib/ai/extraction';
 import { addressHash, findMatch, normalizeUrl, type MatchCandidate } from './dedupe';
 import { recordAudit } from './audit';
 import { createProperty } from './properties';
-import { getEdgeBufferMeters } from './settings';
 
 /**
  * Stages AI-produced candidates for human review.
@@ -32,18 +30,11 @@ export interface StageOutcome {
 export async function stageCandidates(input: {
   candidates: Candidate[];
   scanId: string | null;
-  corridorId: string | null;
   marketId: string | null;
   origin: 'scan' | 'manual_url' | 'manual_document' | 'manual_import';
 }): Promise<StageOutcome> {
   const outcome: StageOutcome = { created: 0, updatedExisting: 0, suppressed: 0, duplicates: 0 };
   if (input.candidates.length === 0) return outcome;
-
-  const [corridor] = input.corridorId
-    ? await db.select().from(corridors).where(eq(corridors.id, input.corridorId)).limit(1)
-    : [undefined];
-
-  const edgeBuffer = await getEdgeBufferMeters();
 
   // Everything already decided by a human, so a rejected listing does not come
   // back as "new" on every subsequent scan.
@@ -51,7 +42,7 @@ export async function stageCandidates(input: {
   const suppressedUrls = new Set(suppressions.filter((s) => s.keyType === 'url').map((s) => s.keyValue));
   const suppressedHashes = new Set(suppressions.filter((s) => s.keyType === 'hash').map((s) => s.keyValue));
 
-  const marketId = input.marketId ?? corridor?.marketId ?? null;
+  const marketId = input.marketId;
 
   const existingProperties: MatchCandidate[] = marketId
     ? (await db
@@ -107,13 +98,7 @@ export async function stageCandidates(input: {
       continue;
     }
 
-    // 3. Geographic relevance against the SAVED boundary. Anything ambiguous or
-    //    near the edge is flagged for review, never silently classified.
-    const relevance = corridor?.boundary
-      ? classifyRelevance(corridor.boundary, { lat: candidate.latitude, lng: candidate.longitude }, edgeBuffer)
-      : 'unknown';
-
-    // 4. Does this look like an existing property?
+    // 3. Does this look like an existing property?
     const match = findMatch(candidate, existingProperties);
 
     const fieldSources: Record<string, unknown> = {};
@@ -136,10 +121,9 @@ export async function stageCandidates(input: {
 
     await db.insert(discoveryResults).values({
       scanId: input.scanId,
-      corridorId: input.corridorId,
       marketId,
       origin: input.origin,
-      status: relevance === 'outside' ? 'needs_research' : 'new',
+      status: 'new',
 
       name: candidate.name,
       addressLine1: candidate.addressLine1,
@@ -153,6 +137,10 @@ export async function stageCandidates(input: {
       askingPrice: candidate.askingPrice != null ? String(candidate.askingPrice) : null,
       buildingSqft: candidate.buildingSqft,
       landAcreage: candidate.landAcreage != null ? String(candidate.landAcreage) : null,
+      noi: candidate.noi != null ? String(candidate.noi) : null,
+      capRateReported: candidate.capRateReported != null ? String(candidate.capRateReported) : null,
+      yearBuilt: candidate.yearBuilt ?? null,
+      tenantInfo: candidate.tenantInfo ?? null,
       listingDate: candidate.listingDate,
 
       ownerName: candidate.ownerName.value,
@@ -166,7 +154,6 @@ export async function stageCandidates(input: {
       sources: candidate.sources,
       evidenceExcerpt: candidate.evidenceExcerpt,
 
-      geoRelevance: relevance,
       geoNote: candidate.locationNote,
 
       normalizedUrl,
@@ -218,6 +205,10 @@ async function buildProposedChanges(
   propose('propertyType', existing.propertyType, candidate.propertyType);
   propose('buildingSqft', existing.buildingSqft, candidate.buildingSqft);
   propose('landAcreage', existing.landAcreage, candidate.landAcreage);
+  propose('noi', existing.noi, candidate.noi);
+  propose('capRateReported', existing.capRateReported, candidate.capRateReported);
+  propose('yearBuilt', existing.yearBuilt, candidate.yearBuilt);
+  propose('tenantInfo', existing.tenantInfo, candidate.tenantInfo);
   propose('listingDate', existing.listingDate, candidate.listingDate);
 
   // A price CHANGE is proposed even on a verified record, because a moving
@@ -262,6 +253,11 @@ export async function approveAsNewProperty(
     askingPrice: (overrides.askingPrice as string) ?? result.askingPrice ?? null,
     buildingSqft: (overrides.buildingSqft as number) ?? result.buildingSqft ?? null,
     landAcreage: (overrides.landAcreage as string) ?? result.landAcreage ?? null,
+    noi: (overrides.noi as string) ?? result.noi ?? null,
+    capRateReported: (overrides.capRateReported as string) ?? result.capRateReported ?? null,
+    capRateReportedSource: result.capRateReported ? (result.sources?.[0]?.url ?? null) : null,
+    yearBuilt: (overrides.yearBuilt as number) ?? result.yearBuilt ?? null,
+    tenantInfo: (overrides.tenantInfo as string) ?? result.tenantInfo ?? null,
     listingStatus: 'for_sale',
     listingDate: result.listingDate ?? null,
     locationSource: 'discovery',
@@ -480,25 +476,21 @@ function buildProvenanceNote(result: typeof discoveryResults.$inferSelect): stri
 
 export async function listDiscoveryResults(filters: {
   status?: string[];
-  corridorId?: string;
   marketId?: string;
   limit?: number;
 } = {}) {
   const conds = [];
   if (filters.status?.length) conds.push(inArray(discoveryResults.status, filters.status as never[]));
-  if (filters.corridorId) conds.push(eq(discoveryResults.corridorId, filters.corridorId));
   if (filters.marketId) conds.push(eq(discoveryResults.marketId, filters.marketId));
 
   return db
     .select({
       r: discoveryResults,
-      corridorName: corridors.name,
       marketName: markets.name,
       suggestedPropertyName: raw<string | null>`(select coalesce(p.name, p.address_line1)
         from properties p where p.id = discovery_results.suggested_property_id)`,
     })
     .from(discoveryResults)
-    .leftJoin(corridors, eq(corridors.id, discoveryResults.corridorId))
     .leftJoin(markets, eq(markets.id, discoveryResults.marketId))
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(desc(discoveryResults.createdAt))

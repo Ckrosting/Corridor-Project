@@ -18,8 +18,6 @@ export const geometrySourceEnum = pgEnum('geometry_source', [
   'traced_tile', // auto-traced from Regrid's free parcel-line tile imagery - approximate, unverified
 ]);
 
-export const corridorBoundaryKindEnum = pgEnum('corridor_boundary_kind', ['radius', 'custom']);
-
 /** Whether a property is for sale. Deliberately separate from outreach + transaction. */
 export const listingStatusEnum = pgEnum('listing_status', [
   'off_market',
@@ -71,7 +69,7 @@ export const jobStatusEnum = pgEnum('job_status', [
   'failed',
 ]);
 
-export const scanScopeEnum = pgEnum('scan_scope', ['corridor', 'market', 'markets', 'all']);
+export const scanScopeEnum = pgEnum('scan_scope', ['market', 'markets', 'all']);
 
 /** Where a discovery candidate sits in the human review workflow. */
 export const discoveryStatusEnum = pgEnum('discovery_status', [
@@ -82,14 +80,6 @@ export const discoveryStatusEnum = pgEnum('discovery_status', [
   'rejected',
   'archived',
   'duplicate',
-]);
-
-/** Result of checking a candidate's location against the saved corridor boundary. */
-export const geoRelevanceEnum = pgEnum('geo_relevance', [
-  'inside',
-  'edge',       // within the review buffer outside the boundary
-  'outside',
-  'unknown',    // no usable coordinates - needs human review, never silently dropped
 ]);
 
 export const customFieldTypeEnum = pgEnum('custom_field_type', [

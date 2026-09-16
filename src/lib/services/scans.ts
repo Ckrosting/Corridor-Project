@@ -1,18 +1,18 @@
 import '@/lib/server-guard';
-import { and, asc, eq, inArray, isNull, sql as raw } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
-import { corridors, markets, properties, propertyCorridors, scanTargets, scans } from '@/db/schema';
+import { markets, properties, scanTargets, scans } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
 import { BudgetError, ConfigurationError, NotFoundError, ValidationError } from '@/lib/errors';
 import { env } from '@/lib/env';
 import { isAiConfigured } from '@/lib/ai/client';
-import { researchCorridor } from '@/lib/ai/research';
+import { researchMarket } from '@/lib/ai/research';
 import { monthToDateSpendUsd, recordUsage, stageCandidates } from './discovery';
 import { enqueue, heartbeat, isCancelRequested } from './jobs';
 import { getSetting, SETTING_KEYS } from './settings';
 import { recordAudit } from './audit';
 
-export type ScanScope = 'corridor' | 'market' | 'markets' | 'all';
+export type ScanScope = 'market' | 'markets' | 'all';
 
 /**
  * Queues a discovery scan.
@@ -24,7 +24,6 @@ export type ScanScope = 'corridor' | 'market' | 'markets' | 'all';
  */
 export async function queueScan(input: {
   scope: ScanScope;
-  corridorId?: string;
   marketId?: string;
   marketIds?: string[];
 }, actor: Actor) {
@@ -51,31 +50,26 @@ export async function queueScan(input: {
     );
   }
 
-  const corridorIds = await resolveCorridorIds(input);
-  if (corridorIds.length === 0) {
-    throw new ValidationError(
-      'No corridors with a saved boundary were found for that selection. Draw or seed a corridor boundary first.',
-    );
+  const marketRows = await resolveMarkets(input);
+  if (marketRows.length === 0) {
+    throw new ValidationError('No markets were found for that selection.');
   }
+  const marketIds = marketRows.map((m) => m.id);
 
   const [scan] = await db.insert(scans).values({
     scope: input.scope,
-    corridorIds,
+    marketIds,
     status: 'queued',
     model: env.ai.model,
-    targetsTotal: corridorIds.length,
+    targetsTotal: marketIds.length,
     requestedBy: actor.id,
     requestedByLabel: actor.name,
   }).returning();
 
-  const corridorRows = await db
-    .select({ id: corridors.id, name: corridors.name })
-    .from(corridors).where(inArray(corridors.id, corridorIds));
-
-  await db.insert(scanTargets).values(corridorRows.map((c) => ({
+  await db.insert(scanTargets).values(marketRows.map((m) => ({
     scanId: scan!.id,
-    corridorId: c.id,
-    corridorLabel: c.name,
+    marketId: m.id,
+    marketLabel: m.name,
     status: 'queued' as const,
   })));
 
@@ -83,7 +77,7 @@ export async function queueScan(input: {
   const { job } = await enqueue({
     type: 'discovery_scan',
     payload: { scanId: scan!.id },
-    dedupeKey: `scan:${input.scope}:${corridorIds.slice().sort().join(',')}`,
+    dedupeKey: `scan:${input.scope}:${marketIds.slice().sort().join(',')}`,
     actor,
   });
 
@@ -91,45 +85,29 @@ export async function queueScan(input: {
 
   await recordAudit({
     entityType: 'scan', entityId: scan!.id, action: 'queue',
-    summary: `Queued a discovery scan over ${corridorIds.length} corridor(s)`,
+    summary: `Queued a discovery scan over ${marketIds.length} market(s)`,
     actor,
   });
 
-  return { scan: scan!, job, corridorCount: corridorIds.length };
+  return { scan: scan!, job, marketCount: marketIds.length };
 }
 
-async function resolveCorridorIds(input: {
-  scope: ScanScope; corridorId?: string; marketId?: string; marketIds?: string[];
-}): Promise<string[]> {
-  // Only corridors with a saved boundary can be scanned — the boundary is what
-  // makes "inside this corridor" a meaningful question, and what results are
-  // checked against for geographic relevance.
-  const hasBoundary = raw`${corridors.boundary} is not null`;
+async function resolveMarkets(input: {
+  scope: ScanScope; marketId?: string; marketIds?: string[];
+}): Promise<Array<{ id: string; name: string }>> {
+  const select = db.select({ id: markets.id, name: markets.name }).from(markets);
 
   switch (input.scope) {
-    case 'corridor': {
-      if (!input.corridorId) throw new ValidationError('Choose a corridor to scan.');
-      const rows = await db.select({ id: corridors.id }).from(corridors)
-        .where(and(eq(corridors.id, input.corridorId), isNull(corridors.archivedAt), hasBoundary));
-      return rows.map((r) => r.id);
-    }
     case 'market': {
       if (!input.marketId) throw new ValidationError('Choose a market to scan.');
-      const rows = await db.select({ id: corridors.id }).from(corridors)
-        .where(and(eq(corridors.marketId, input.marketId), isNull(corridors.archivedAt), hasBoundary));
-      return rows.map((r) => r.id);
+      return select.where(and(eq(markets.id, input.marketId), isNull(markets.archivedAt)));
     }
     case 'markets': {
       if (!input.marketIds?.length) throw new ValidationError('Choose at least one market to scan.');
-      const rows = await db.select({ id: corridors.id }).from(corridors)
-        .where(and(inArray(corridors.marketId, input.marketIds), isNull(corridors.archivedAt), hasBoundary));
-      return rows.map((r) => r.id);
+      return select.where(and(inArray(markets.id, input.marketIds), isNull(markets.archivedAt)));
     }
-    case 'all': {
-      const rows = await db.select({ id: corridors.id }).from(corridors)
-        .where(and(isNull(corridors.archivedAt), hasBoundary));
-      return rows.map((r) => r.id);
-    }
+    case 'all':
+      return select.where(isNull(markets.archivedAt));
   }
 }
 
@@ -147,12 +125,12 @@ export interface ScanRunSummary {
 }
 
 /**
- * Runs a queued scan, corridor by corridor.
+ * Runs a queued scan, market by market.
  *
- * Checkpoints between corridors: it checks for a cancel request and re-checks
+ * Checkpoints between markets: it checks for a cancel request and re-checks
  * the monthly budget, so a long multi-market scan stops promptly and cannot blow
- * through the ceiling mid-run. A corridor that fails is recorded and the scan
- * continues — one bad corridor must not lose the results of thirty good ones.
+ * through the ceiling mid-run. A market that fails is recorded and the scan
+ * continues — one bad market must not lose the results of thirty good ones.
  */
 export async function runScan(scanId: string, jobId: string): Promise<ScanRunSummary> {
   const [scan] = await db.select().from(scans).where(eq(scans.id, scanId)).limit(1);
@@ -169,7 +147,7 @@ export async function runScan(scanId: string, jobId: string): Promise<ScanRunSum
 
   const targets = await db.select().from(scanTargets)
     .where(eq(scanTargets.scanId, scanId))
-    .orderBy(asc(scanTargets.corridorLabel));
+    .orderBy(asc(scanTargets.marketLabel));
 
   const summary: ScanRunSummary = {
     status: 'completed', targetsCompleted: 0, resultsFound: 0,
@@ -187,7 +165,7 @@ export async function runScan(scanId: string, jobId: string): Promise<ScanRunSum
       break;
     }
 
-    // Re-checked every corridor, not just at queue time: a long scan must not
+    // Re-checked every market, not just at queue time: a long scan must not
     // sail past the ceiling.
     const spent = await monthToDateSpendUsd();
     if (spent >= budget) {
@@ -203,43 +181,32 @@ export async function runScan(scanId: string, jobId: string): Promise<ScanRunSum
       .where(eq(scanTargets.id, target.id));
 
     try {
-      if (!target.corridorId) throw new Error('This corridor no longer exists.');
+      if (!target.marketId) throw new Error('This market no longer exists.');
 
-      const [corridor] = await db
-        .select({
-          c: corridors,
-          marketName: markets.name,
-        })
-        .from(corridors)
-        .leftJoin(markets, eq(markets.id, corridors.marketId))
-        .where(eq(corridors.id, target.corridorId))
-        .limit(1);
-      if (!corridor) throw new Error('This corridor no longer exists.');
+      const [market] = await db.select().from(markets).where(eq(markets.id, target.marketId)).limit(1);
+      if (!market) throw new Error('This market no longer exists.');
 
       // A sample of known addresses, so the model does not simply re-report what
       // we already track.
       const known = await db
         .select({ address: properties.addressLine1, city: properties.city })
         .from(properties)
-        .innerJoin(propertyCorridors, eq(propertyCorridors.propertyId, properties.id))
-        .where(and(eq(propertyCorridors.corridorId, target.corridorId), isNull(properties.archivedAt)))
+        .where(and(eq(properties.marketId, target.marketId), isNull(properties.archivedAt)))
         .limit(40);
 
-      const outcome = await researchCorridor({
-        corridorName: corridor.c.name,
-        marketName: corridor.marketName ?? 'Unknown market',
+      const outcome = await researchMarket({
+        marketName: market.name,
         city: known[0]?.city ?? null,
-        state: null,
-        centerLat: corridor.c.centerLatitude,
-        centerLng: corridor.c.centerLongitude,
-        approxRadiusMiles: corridor.c.radiusMeters ? corridor.c.radiusMeters / 1609.34 : null,
+        state: market.state,
+        centerLat: null,
+        centerLng: null,
         knownAddresses: known.map((k) => [k.address, k.city].filter(Boolean).join(', ')).filter(Boolean),
       }, rates);
 
       await recordUsage({
         scanId,
         model: env.ai.model,
-        operation: 'scan_corridor',
+        operation: 'scan_market',
         inputTokens: outcome.usage.inputTokens,
         outputTokens: outcome.usage.outputTokens,
         webSearches: outcome.usage.webSearches,
@@ -249,8 +216,7 @@ export async function runScan(scanId: string, jobId: string): Promise<ScanRunSum
       const staged = await stageCandidates({
         candidates: outcome.result.candidates,
         scanId,
-        corridorId: target.corridorId,
-        marketId: corridor.c.marketId,
+        marketId: target.marketId,
         origin: 'scan',
       });
 
@@ -274,7 +240,7 @@ export async function runScan(scanId: string, jobId: string): Promise<ScanRunSum
       await db.update(scanTargets).set({
         status: 'failed', error: message, finishedAt: new Date(),
       }).where(eq(scanTargets.id, target.id));
-      summary.coverageNotes.push(`"${target.corridorLabel}" failed: ${message}`);
+      summary.coverageNotes.push(`"${target.marketLabel}" failed: ${message}`);
     }
 
     await db.update(scans).set({

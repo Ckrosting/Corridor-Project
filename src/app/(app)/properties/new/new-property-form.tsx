@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { MapPin, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { LISTING_STATUS_LABELS } from '@/lib/format';
 import { Spinner } from '@/components/ui/primitives';
 
@@ -20,15 +20,13 @@ interface GeocodeHit {
  * the boundary can be drawn whenever it suits.
  */
 export function NewPropertyForm({
-  markets, statuses, propertyTypes, defaultMarketId, corridorId, corridorName, corridorCenter,
+  markets, statuses, propertyTypes, defaultMarketId, returnToMarketId,
 }: {
   markets: Array<{ id: string; name: string }>;
   statuses: Array<{ id: string; label: string; color: string }>;
   propertyTypes: string[];
   defaultMarketId: string;
-  corridorId: string | null;
-  corridorName: string | null;
-  corridorCenter: { lat: number; lng: number } | null;
+  returnToMarketId: string | null;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -108,7 +106,6 @@ export function NewPropertyForm({
           landAcreage: blank(form.landAcreage),
           outreachStatusId: form.outreachStatusId || null,
           researchNotes: blank(form.researchNotes),
-          corridorIds: corridorId ? [corridorId] : undefined,
         }),
       });
 
@@ -121,7 +118,7 @@ export function NewPropertyForm({
           : body.error ?? 'Could not create the property.');
       }
 
-      router.push(corridorId ? `/corridors/${corridorId}` : `/properties/${body.property.id}`);
+      router.push(returnToMarketId ? `/markets/${returnToMarketId}` : `/properties/${body.property.id}`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create the property.');
@@ -132,16 +129,6 @@ export function NewPropertyForm({
   return (
     <form className="card" onSubmit={submit}>
       <div className="space-y-4 p-5">
-        {corridorName && (
-          <div className="banner-info">
-            <span>
-              This property will be linked to <strong>{corridorName}</strong>. If its coordinates
-              fall inside other corridor boundaries, it is linked to those too — one record, not a
-              copy per corridor.
-            </span>
-          </div>
-        )}
-
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label" htmlFor="p-market">Market <span className="text-red-600">*</span></label>
@@ -191,18 +178,6 @@ export function NewPropertyForm({
           <button type="button" className="btn-secondary btn-sm" onClick={() => void lookup()} disabled={searching}>
             {searching ? <Spinner /> : <Search size={13} />} Look up coordinates
           </button>
-          {corridorCenter && (
-            <button
-              type="button" className="btn-secondary btn-sm ml-2"
-              onClick={() => setForm((f) => ({
-                ...f,
-                latitude: String(corridorCenter.lat),
-                longitude: String(corridorCenter.lng),
-              }))}
-            >
-              <MapPin size={13} /> Use corridor centre
-            </button>
-          )}
         </div>
 
         {geoNote && <div className="banner-warn">{geoNote}</div>}
@@ -284,7 +259,7 @@ export function NewPropertyForm({
       </div>
 
       <div className="flex justify-end gap-2 border-t border-ink-200 px-5 py-3">
-        <Link href={corridorId ? `/corridors/${corridorId}` : '/properties'} className="btn-secondary">Cancel</Link>
+        <Link href={returnToMarketId ? `/markets/${returnToMarketId}` : '/properties'} className="btn-secondary">Cancel</Link>
         <button type="submit" className="btn-primary" disabled={busy || !form.marketId}>
           {busy && <Spinner />} Create property
         </button>

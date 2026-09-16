@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { requirePageUser } from '@/lib/auth/guards';
 import { getMarketWorkspace } from '@/lib/services/workspace';
 import { NotFoundError } from '@/lib/errors';
+import { isAiConfigured } from '@/lib/ai/client';
 import { MarketWorkspace } from '@/components/workspace/market-workspace';
 
 export const dynamic = 'force-dynamic';
@@ -24,11 +25,13 @@ export default async function MarketPage({ params }: { params: Promise<{ id: str
     return (
       <MarketWorkspace
         market={w.market}
-        corridors={w.corridors}
         anchors={w.anchors}
+        statuses={w.statuses}
+        tags={w.tags}
+        propertyTypes={w.propertyTypes}
         properties={w.properties}
         parcels={w.parcels}
-        statuses={w.statuses}
+        aiConfigured={isAiConfigured()}
         isAdmin={actor.role === 'admin'}
       />
     );

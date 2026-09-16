@@ -29,7 +29,7 @@
                    ▼
            ┌───────────────┐      ┌──────────────────┐
            │  PostgreSQL   │      │ object storage   │
-           │  34 tables    │      │ (local │ S3)     │
+           │  32 tables    │      │ (local │ S3)     │
            └───────────────┘      └──────────────────┘
 ```
 
@@ -40,14 +40,12 @@ Both processes read the same `DATABASE_URL`. Multiple workers may run at once.
 
 ## Data model
 
-`Market → Corridors → Properties → Parcels`, with the relationships that matter
-modelled explicitly.
+`Market → Properties → Parcels`, with the relationships that matter modelled
+explicitly.
 
-**A property belongs to many corridors.** `property_corridors` is a join table.
-A property inside three overlapping corridors is *one* row in `properties` with
-three join rows — its contacts, notes and call history exist once. Membership is
-recomputed from geometry whenever a boundary or a property's coordinates change,
-and a manually pinned link survives that recomputation.
+**A property belongs to exactly one market.** `properties.market_id` is a plain
+foreign key — no grouping or boundary layer sits between a market and the
+properties inside it.
 
 **A property has many parcels, and geometry is optional.** A parcel ID can be
 recorded long before anyone draws its outline, and a property can exist as a bare
@@ -88,10 +86,6 @@ Why not PostGIS: it cannot be installed on the target machine without
 administrator rights, and it adds friction on Railway. At this scale the
 bbox-then-exact approach is fast, and the columns can later be replaced by a
 `geography` column without changing the API surface.
-
-Radius corridors and hand-drawn corridors are both *stored as polygons*, so
-containment has exactly one code path. The radius parameters are retained so a
-user can return to a clean circle.
 
 All coordinates are stored in GeoJSON order — `[longitude, latitude]`. Leaflet
 uses `[lat, lng]`. Every conversion goes through `src/lib/geo/convert.ts`; there
@@ -168,7 +162,7 @@ Two workers polling simultaneously cannot claim the same row and neither blocks
 the other. Running jobs heartbeat every 30 seconds; one that goes silent is
 reclaimed and retried rather than being stuck forever. Failures retry with
 exponential backoff up to `max_attempts`, then record the error visibly.
-Cancellation is cooperative — checked between corridors, so partial results are
+Cancellation is cooperative — checked between markets, so partial results are
 kept. A partial unique index on `dedupe_key` allows only one queued-or-running
 job per key, so double-clicking cannot start two scans.
 
@@ -206,9 +200,9 @@ src/
 │   └── signin/
 ├── components/
 │   ├── map/                Leaflet (client-only)
-│   ├── workspace/          corridor/market workspaces, call logger, panels
+│   ├── workspace/          market workspace, call logger, panels
 │   └── ui/                 primitives
-├── db/schema/              34 tables across 8 files
+├── db/schema/              32 tables across 8 files
 ├── lib/
 │   ├── ai/                 client, prompts, extraction schema, research
 │   ├── geo/                types, polygon maths, Leaflet conversion, geocoding

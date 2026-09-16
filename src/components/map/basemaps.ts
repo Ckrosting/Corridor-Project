@@ -48,7 +48,7 @@ const OSM: Basemap = {
  * Third-party county tax parcel lines, always shown on top of whichever
  * basemap is active - a visual reference only, drawn by a third party
  * (Regrid, as Esri's parcel-data partner), free and keyless. This is NOT the
- * approximate research boundary a user draws for a corridor or parcel - it is
+ * approximate research outline a user draws for a parcel - it is
  * an actual surveyed tax line, shown for orientation only.
  *
  * Only renders once zoomed in close enough for individual parcels to be

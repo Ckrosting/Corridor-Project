@@ -2,11 +2,10 @@ import 'dotenv/config';
 import { eq, inArray, like } from 'drizzle-orm';
 import { db } from '@/db';
 import {
-  corridors, markets, opportunities, outreachStatuses, properties,
+  markets, opportunities, outreachStatuses, properties,
   transactionStages, users,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
-import { circleToPolygon, computeBBox } from '@/lib/geo/polygon';
 import type { AreaGeometry } from '@/lib/geo/types';
 
 /**
@@ -60,22 +59,6 @@ export async function createTestMarket(name = 'Market') {
   return market!;
 }
 
-/** A radius corridor centred on a point, materialised the same way the app does. */
-export async function createRadiusCorridor(
-  marketId: string, center: { lat: number; lng: number }, radiusMeters: number, name = 'Corridor',
-) {
-  const boundary = circleToPolygon(center, radiusMeters);
-  const b = computeBBox(boundary);
-  const [corridor] = await db.insert(corridors).values({
-    marketId, name: `${TEST_PREFIX} ${name}`,
-    boundaryKind: 'radius', boundarySource: 'radius',
-    centerLatitude: center.lat, centerLongitude: center.lng, radiusMeters,
-    boundary,
-    minLatitude: b.minLat, maxLatitude: b.maxLat, minLongitude: b.minLng, maxLongitude: b.maxLng,
-  }).returning();
-  return corridor!;
-}
-
 /** An axis-aligned square polygon of roughly `halfSizeDeg` around a point. */
 export function squareAround(center: { lat: number; lng: number }, halfSizeDeg = 0.001): AreaGeometry {
   const { lat, lng } = center;
@@ -97,7 +80,7 @@ export function squareAround(center: { lat: number; lng: number }, halfSizeDeg =
  * Order matters: `properties.market_id` is ON DELETE RESTRICT on purpose, so that
  * a market holding real property records cannot be deleted by accident. Cleanup
  * therefore removes the dependants explicitly rather than relying on a cascade.
- * Parcels, activities, corridor links and opportunity links all cascade from
+ * Parcels, activities and opportunity links all cascade from
  * the property rows.
  */
 export async function cleanupTestData() {
@@ -112,7 +95,6 @@ export async function cleanupTestData() {
     // otherwise survive as orphans.
     await db.delete(opportunities).where(inArray(opportunities.marketId, ids));
     await db.delete(properties).where(inArray(properties.marketId, ids));
-    await db.delete(corridors).where(inArray(corridors.marketId, ids));
     await db.delete(markets).where(inArray(markets.id, ids));
   }
 

@@ -13,7 +13,6 @@ export const GET = route(async (req: Request) => {
   return ok({
     results: await listDiscoveryResults({
       status: status.length ? status : undefined,
-      corridorId: sp.get('corridorId') ?? undefined,
       marketId: sp.get('marketId') ?? undefined,
     }),
   });

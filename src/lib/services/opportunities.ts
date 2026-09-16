@@ -121,7 +121,6 @@ async function defaultStageId(): Promise<string | null> {
 
 export interface OpportunityFilters {
   marketId?: string;
-  corridorId?: string;
   stageIds?: string[];
   /** Terminal stages are hidden from the active board unless asked for. */
   includeTerminal?: boolean;
@@ -137,11 +136,6 @@ export async function listOpportunities(f: OpportunityFilters = {}) {
   if (!f.includeTerminal) conds.push(eq(transactionStages.isTerminal, false));
   if (f.marketId) conds.push(eq(opportunities.marketId, f.marketId));
   if (f.stageIds?.length) conds.push(sqlIn('opportunities.stage_id', f.stageIds));
-  if (f.corridorId) {
-    conds.push(raw`exists (select 1 from opportunity_properties op
-      join property_corridors pc on pc.property_id = op.property_id
-      where op.opportunity_id = opportunities.id and pc.corridor_id = ${f.corridorId})`);
-  }
   if (f.search?.trim()) {
     const q = `%${f.search.trim().toLowerCase()}%`;
     conds.push(raw`(lower(opportunities.name) like ${q}

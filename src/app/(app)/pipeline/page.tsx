@@ -28,7 +28,6 @@ export default async function PipelinePage({
   const [rows, stages, marketList] = await Promise.all([
     listOpportunities({
       marketId: one('marketId'),
-      corridorId: one('corridorId'),
       includeTerminal,
       includeRemoved,
       includeSample,

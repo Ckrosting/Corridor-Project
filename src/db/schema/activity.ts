@@ -102,15 +102,15 @@ export const attachments = pgTable(
   ],
 );
 
-/** Per-user saved filter sets for the corridor workspace and pipeline. */
+/** Per-user saved filter sets for the market workspace and pipeline. */
 export const savedViews = pgTable(
   'saved_views',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
-    scope: text('scope').notNull(), // corridor | market | portfolio | pipeline
+    scope: text('scope').notNull(), // market | portfolio | pipeline
     filters: jsonb('filters').$type<Record<string, unknown>>().notNull(),
-    corridorId: uuid('corridor_id'),
+    marketId: uuid('market_id'),
     ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
     /** Shared views are visible to the whole team; otherwise private to the owner. */
     isShared: jsonb('is_shared').$type<boolean>(),

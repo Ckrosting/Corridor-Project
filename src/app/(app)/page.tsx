@@ -5,8 +5,8 @@ import {
 } from 'lucide-react';
 import { db } from '@/db';
 import {
-  corridors, discoveryResults, mallAnchors, markets, opportunities, properties,
-  propertyCorridors, transactionStages,
+  discoveryResults, mallAnchors, markets, opportunities, properties,
+  transactionStages,
 } from '@/db/schema';
 import { requirePageUser } from '@/lib/auth/guards';
 import { getFollowUpCounts, getRecentActivity } from '@/lib/services/activities';
@@ -35,8 +35,6 @@ export default async function DashboardPage() {
         id: markets.id,
         name: markets.name,
         state: markets.state,
-        corridorCount: raw<number>`(select count(*)::int from corridors c
-          where c.market_id = markets.id and c.archived_at is null)`,
         anchorCount: raw<number>`(select count(*)::int from mall_anchors ma
           where ma.market_id = markets.id and ma.archived_at is null)`,
         propertyCount: raw<number>`(select count(*)::int from properties p
@@ -77,7 +75,7 @@ export default async function DashboardPage() {
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-ink-200 bg-white px-6 py-3">
         <div>
           <h1 className="text-base font-semibold tracking-tight text-ink-900">Portfolio</h1>
-          <p className="text-xs text-ink-500">Markets, corridors and current work</p>
+          <p className="text-xs text-ink-500">Markets, properties and current work</p>
         </div>
         <div className="flex items-center gap-2">
           <GlobalSearch />
@@ -140,7 +138,7 @@ export default async function DashboardPage() {
                 <EmptyState
                   icon={<MapPin size={24} />}
                   title="No markets yet"
-                  body="A market holds your mall anchors and the corridors around them. Create one, or import your mall list from a spreadsheet."
+                  body="A market holds your mall anchors and the properties around them. Create one, or import your mall list from a spreadsheet."
                   action={
                     <div className="flex gap-2">
                       <Link href="/markets/new" className="btn-primary btn-sm">Create a market</Link>
@@ -155,7 +153,6 @@ export default async function DashboardPage() {
                       <tr>
                         <th>Market</th>
                         <th className="w-20 text-right">Malls</th>
-                        <th className="w-24 text-right">Corridors</th>
                         <th className="w-24 text-right">Properties</th>
                       </tr>
                     </thead>
@@ -174,7 +171,6 @@ export default async function DashboardPage() {
                             )}
                           </td>
                           <td className="text-right tnum text-ink-700">{m.anchorCount}</td>
-                          <td className="text-right tnum text-ink-700">{m.corridorCount}</td>
                           <td className="text-right tnum text-ink-700">{m.propertyCount}</td>
                         </tr>
                       ))}

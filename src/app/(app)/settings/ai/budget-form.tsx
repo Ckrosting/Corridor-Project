@@ -9,7 +9,7 @@ import { Spinner } from '@/components/ui/primitives';
  * The monthly AI spend ceiling.
  *
  * Deliberately has no default the team did not choose: it is enforced before a
- * scan starts and re-checked between corridors, and a budget of $0 disables
+ * scan starts and re-checked between markets, and a budget of $0 disables
  * scans entirely. Nothing recurring ever runs on its own — every scan is an
  * explicit action.
  */
@@ -123,7 +123,7 @@ export function BudgetForm({
 
       <div className="banner-info">
         <span>
-          The budget is checked before a scan starts <strong>and again between corridors</strong>,
+          The budget is checked before a scan starts <strong>and again between markets</strong>,
           so a long multi-market scan stops when the ceiling is reached and keeps whatever it had
           already found. No scan ever runs on a schedule — every one is started by a person.
         </span>

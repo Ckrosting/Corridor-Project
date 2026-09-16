@@ -50,9 +50,6 @@ export async function exportPropertiesCsv(opts: { includeSample?: boolean } = {}
       parcelIds: raw<string | null>`(select string_agg(pp.parcel_id_text, ' | ')
         from property_parcels pp where pp.property_id = properties.id
           and pp.parcel_id_text is not null)`,
-      corridorNames: raw<string | null>`(select string_agg(c.name, ' | ')
-        from property_corridors pc join corridors c on c.id = pc.corridor_id
-        where pc.property_id = properties.id)`,
     })
     .from(properties)
     .leftJoin(markets, eq(markets.id, properties.marketId))
@@ -66,7 +63,7 @@ export async function exportPropertiesCsv(opts: { includeSample?: boolean } = {}
     'latitude', 'longitude', 'property_type', 'land_acreage', 'building_sqft',
     'occupancy_percent', 'asking_price', 'target_purchase_price', 'seller_indicated_price',
     'noi', 'cap_rate_reported', 'owner_entity', 'listing_status', 'listing_date',
-    'outreach_status', 'next_follow_up_date', 'parcel_ids', 'corridors',
+    'outreach_status', 'next_follow_up_date', 'parcel_ids',
     'research_notes', 'is_sample', 'created_at', 'updated_at',
   ];
 
@@ -75,7 +72,7 @@ export async function exportPropertiesCsv(opts: { includeSample?: boolean } = {}
     r.latitude, r.longitude, r.propertyType, r.landAcreage, r.buildingSqft,
     r.occupancyPercent, r.askingPrice, r.targetPurchasePrice, r.sellerIndicatedPrice,
     r.noi, r.capRateReported, r.ownerEntityName, r.listingStatus, r.listingDate,
-    r.outreachStatus, r.nextFollowUpDate, r.parcelIds, r.corridorNames,
+    r.outreachStatus, r.nextFollowUpDate, r.parcelIds,
     r.researchNotes, r.isSample, r.createdAt, r.updatedAt,
   ]));
 }

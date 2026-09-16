@@ -36,3 +36,7 @@ npm-debug.log*
 coverage/
 /backups/
 *.tsbuildinfo
+
+# Excel writes these beside a workbook while it is open
+~$*.xlsx
+.claude/scheduled_tasks.lock

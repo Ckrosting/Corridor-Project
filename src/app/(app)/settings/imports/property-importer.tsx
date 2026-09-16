@@ -117,7 +117,7 @@ export function PropertyImporter({ markets }: { markets: Array<{ id: string; nam
               <> {result.parcelsMatched} matched to a real parcel boundary from the county&rsquo;s own GIS records.</>
             )}
             {' '}Any property without coordinates is flagged &ldquo;needs map placement&rdquo;, ready to place and
-            work from a corridor.
+            work from a market.
           </span>
         </div>
         <button type="button" className="btn-secondary btn-sm" onClick={() => setResult(null)}>

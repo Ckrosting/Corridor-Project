@@ -6,6 +6,8 @@ import { csvCell, normaliseHeader, parseCsv, toCsv } from '@/lib/csv';
 import {
   commitMallImport, createImportBatch, parseImportFile, suggestMallMapping, validateMallRows,
 } from '@/lib/services/import';
+import { parseCandidateCsv, parseCandidateXlsx } from '@/lib/services/candidate-csv';
+import { readXlsxRows } from '@/lib/xlsx';
 import type { Actor } from '@/lib/auth/guards';
 import { cleanupTestData, ensureBaseline, testActor, TEST_PREFIX } from './helpers';
 
@@ -84,6 +86,193 @@ describe('csv parsing', () => {
     expect(normaliseHeader('Mall Name')).toBe('mall_name');
     expect(normaliseHeader('MALL-NAME')).toBe('mall_name');
     expect(normaliseHeader('  mall_name  ')).toBe('mall_name');
+  });
+});
+
+/* ========================================================================== */
+/* Broker listings export -> discovery candidates                             */
+/* ========================================================================== */
+
+/** The real Crexi "Inventory Export" shape: a blank row, a banner, then headers. */
+const CREXI_HEADER = 'Property Link,Property Name,Property Status,Type,Property Subtype,Address,City,State,Zip,County,Tenant(s),SqFt,Year Built,Lot Size,Price/Unit,NOI,Cap Rate,Asking Price,Price/SqFt,Price/Acre,Days on Market,Longitude,Latitude';
+
+const crexi = (...rows: string[]) =>
+  ['411 properties found', CREXI_HEADER, ...rows].join('\n');
+
+describe('candidate import', () => {
+  it('finds the header row below an export banner', () => {
+    const parsed = parseCandidateCsv(crexi(
+      'https://www.crexi.com/properties/1,Chestnut,On-Market,Land,"Commercial, Residential",4523 W Chestnut St,Tampa,FL,33607,Hillsborough County,N/A,24000,,,,,0,890000,60,,1211,-82.52186,27.958998',
+    ));
+
+    expect(parsed.headerRowNumber).toBe(2);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.candidates).toHaveLength(1);
+    expect(parsed.candidates[0]!.addressLine1).toBe('4523 W Chestnut St');
+  });
+
+  it('maps a listing link to a source, so the candidate has provenance', () => {
+    const [candidate] = parseCandidateCsv(crexi(
+      'https://www.crexi.com/properties/2,Aegean,On-Market,Multifamily,Apartment Building,4325 Aegean Dr,Tampa,FL,33611,Hillsborough County,Vacant,23640,1981,1.79,195652,312604,6.95,4500000,190.36,,1156,-82.5173365,27.8970668',
+    )).candidates;
+
+    expect(candidate!.sources).toEqual([
+      { url: 'https://www.crexi.com/properties/2', title: null, sourceName: null },
+    ]);
+    expect(candidate!.landAcreage).toBe(1.79);
+    expect(candidate!.noi).toBe(312604);
+    expect(candidate!.capRateReported).toBe(6.95);
+    expect(candidate!.yearBuilt).toBe(1981);
+    expect(candidate!.tenantInfo).toBe('Vacant');
+  });
+
+  it('treats "N/A" as empty and a zero cap rate as not stated', () => {
+    const [candidate] = parseCandidateCsv(crexi(
+      'https://www.crexi.com/properties/3,Chestnut,On-Market,Land,Commercial,4523 W Chestnut St,Tampa,FL,33607,Hillsborough County,N/A,24000,N/A,,,,0,890000,60,,1211,-82.52186,27.958998',
+    )).candidates;
+
+    expect(candidate!.tenantInfo).toBeNull();
+    expect(candidate!.yearBuilt).toBeNull();
+    expect(candidate!.capRateReported).toBeNull();
+    expect(candidate!.noi).toBeNull();
+  });
+
+  it('reports the columns it could not place', () => {
+    const parsed = parseCandidateCsv(crexi(
+      'https://www.crexi.com/properties/4,Chestnut,On-Market,Land,Commercial,4523 W Chestnut St,Tampa,FL,33607,Hillsborough County,,24000,,,,,,890000,,,1211,-82.52186,27.958998',
+    ));
+
+    expect(parsed.unmappedHeaders).toEqual([
+      'Property Status', 'Property Subtype', 'Price/Unit', 'Price/SqFt', 'Price/Acre', 'Days on Market',
+    ]);
+  });
+
+  it('refuses a file whose columns mean nothing rather than importing blanks', () => {
+    expect(() => parseCandidateCsv('a report\nof no columns\nat all')).toThrow();
+  });
+});
+
+/* ========================================================================== */
+/* Workbook reading                                                           */
+/* ========================================================================== */
+
+/** A stored (uncompressed) ZIP, which is all `readXlsxRows` needs to open. */
+function zip(files: Array<[string, string]>): Buffer {
+  const locals: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+
+  for (const [name, content] of files) {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const data = Buffer.from(content, 'utf8');
+
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 8); // stored
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    locals.push(local, nameBuf, data);
+
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x02014b50, 0);
+    entry.writeUInt16LE(20, 6);
+    entry.writeUInt16LE(0, 10); // stored
+    entry.writeUInt32LE(data.length, 20);
+    entry.writeUInt32LE(data.length, 24);
+    entry.writeUInt16LE(nameBuf.length, 28);
+    entry.writeUInt32LE(offset, 42);
+    central.push(entry, nameBuf);
+
+    offset += local.length + nameBuf.length + data.length;
+  }
+
+  const body = Buffer.concat(locals);
+  const directory = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(directory.length, 12);
+  eocd.writeUInt32LE(body.length, 16);
+
+  return Buffer.concat([body, directory, eocd]);
+}
+
+/**
+ * A workbook shaped like Crexi's: every tag namespace-PREFIXED, a banner above
+ * the header row, and empty cells written self-closing rather than omitted.
+ */
+function workbook(sheetRows: string): Buffer {
+  const strings = [
+    '3 properties found', 'Property Link', 'Property Name', 'Address', 'City', 'State',
+    'Asking Price', 'https://www.crexi.com/properties/9', 'Test Plaza', '1 Main St', 'Tampa',
+  ];
+  return zip([
+    ['xl/workbook.xml',
+      '<x:workbook><x:sheets><x:sheet name="S" sheetId="1" r:id="rId1"/></x:sheets></x:workbook>'],
+    ['xl/_rels/workbook.xml.rels',
+      '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'],
+    ['xl/sharedStrings.xml',
+      `<x:sst>${strings.map((s) => `<x:si><x:t>${s}</x:t></x:si>`).join('')}</x:sst>`],
+    ['xl/worksheets/sheet1.xml', `<x:worksheet><x:sheetData>${sheetRows}</x:sheetData></x:worksheet>`],
+  ]);
+}
+
+const CREXI_SHEET = [
+  // Banner row: the merged cells after A1 are self-closing and carry no index.
+  '<x:row r="1"><x:c r="A1" t="s"><x:v>0</x:v></x:c><x:c r="B1" s="1" t="s"/></x:row>',
+  `<x:row r="2">${
+    ['A', 'B', 'C', 'D', 'E', 'F']
+      .map((col, i) => `<x:c r="${col}2" t="s"><x:v>${i + 1}</x:v></x:c>`).join('')
+  }</x:row>`,
+  // State (E3) is empty and self-closing, and the asking price follows it.
+  '<x:row r="3">'
+  + '<x:c r="A3" t="s"><x:v>7</x:v></x:c>'
+  + '<x:c r="B3" t="s"><x:v>8</x:v></x:c>'
+  + '<x:c r="C3" t="s"><x:v>9</x:v></x:c>'
+  + '<x:c r="D3" t="s"><x:v>10</x:v></x:c>'
+  + '<x:c r="E3" s="1" t="s"/>'
+  + '<x:c r="F3" t="n"><x:v>890000</x:v></x:c>'
+  + '</x:row>',
+].join('');
+
+describe('xlsx reading', () => {
+  it('reads a namespace-prefixed workbook that tag-name-matching libraries cannot', () => {
+    const rows = readXlsxRows(workbook(CREXI_SHEET));
+
+    expect(rows[1]).toEqual([
+      'Property Link', 'Property Name', 'Address', 'City', 'State', 'Asking Price',
+    ]);
+  });
+
+  it('keeps the value after a self-closing cell instead of swallowing it', () => {
+    // Regression: a body group that scanned past `/>` consumed the NEXT cell's
+    // <v> and its closing tag, silently dropping a real asking price.
+    const rows = readXlsxRows(workbook(CREXI_SHEET));
+
+    expect(rows[2]![4]).toBe('');       // the empty, self-closing cell
+    expect(rows[2]![5]).toBe('890000'); // the price that followed it
+  });
+
+  it('leaves an empty shared-string cell empty rather than reusing the first string', () => {
+    // Regression: Number('') === 0 previously resolved to shared string #0, so
+    // every blank cell on the banner row repeated the banner text.
+    const rows = readXlsxRows(workbook(CREXI_SHEET));
+
+    expect(rows[0]![0]).toBe('3 properties found');
+    expect(rows[0]![1]).toBe('');
+  });
+
+  it('imports a workbook end to end, finding the header below the banner', () => {
+    const parsed = parseCandidateXlsx(workbook(CREXI_SHEET));
+
+    expect(parsed.headerRowNumber).toBe(2);
+    expect(parsed.candidates).toHaveLength(1);
+    expect(parsed.candidates[0]!.askingPrice).toBe(890000);
+    expect(parsed.candidates[0]!.state).toBeNull();
+    expect(parsed.candidates[0]!.sources[0]!.url).toBe('https://www.crexi.com/properties/9');
   });
 });
 

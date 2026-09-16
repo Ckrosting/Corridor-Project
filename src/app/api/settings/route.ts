@@ -12,8 +12,6 @@ export const runtime = 'nodejs';
 const WRITABLE: Record<string, z.ZodTypeAny> = {
   [SETTING_KEYS.showSampleData]: z.boolean(),
   [SETTING_KEYS.propertyTypes]: z.array(z.string().trim().min(1).max(80)).max(100),
-  [SETTING_KEYS.corridorEdgeBufferMeters]: z.number().int().min(0).max(10_000),
-  [SETTING_KEYS.defaultCorridorRadiusMeters]: z.number().int().min(50).max(200_000),
   [SETTING_KEYS.aiMonthlyBudgetUsd]: z.number().min(0).max(100_000),
   [SETTING_KEYS.aiCostRates]: z.object({
     inputPerMTok: z.number().min(0).max(1000),

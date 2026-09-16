@@ -19,5 +19,5 @@ export const Map = dynamic(() => import('./map-view').then((m) => m.MapView), {
 });
 
 export type {
-  DrawMode, MapAnchor, MapCorridor, MapParcel, MapProperty, MapViewHandle,
+  DrawMode, MapAnchor, MapParcel, MapProperty, MapViewHandle,
 } from './map-view';

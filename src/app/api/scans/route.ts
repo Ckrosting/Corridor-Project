@@ -8,8 +8,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const schema = z.object({
-  scope: z.enum(['corridor', 'market', 'markets', 'all']),
-  corridorId: z.string().uuid().optional(),
+  scope: z.enum(['market', 'markets', 'all']),
   marketId: z.string().uuid().optional(),
   marketIds: z.array(z.string().uuid()).max(200).optional(),
 });
@@ -26,6 +25,6 @@ export const GET = route(async () => {
 export const POST = route(async (req: Request) => {
   const actor = await requireUser();
   const input = schema.parse(await readJson(req));
-  const { scan, corridorCount } = await queueScan(input, actor);
-  return ok({ scan, corridorCount }, 202);
+  const { scan, marketCount } = await queueScan(input, actor);
+  return ok({ scan, marketCount }, 202);
 });

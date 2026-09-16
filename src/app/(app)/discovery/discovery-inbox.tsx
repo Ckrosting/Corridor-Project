@@ -30,7 +30,6 @@ interface Result {
   sources: Array<{ url: string; title?: string | null; sourceName?: string | null }> | null;
   evidenceExcerpt: string | null;
   needsVerification: string[] | null;
-  geoRelevance: string;
   geoNote: string | null;
   firstSeenAt: string | Date;
   lastSeenAt: string | Date;
@@ -38,7 +37,6 @@ interface Result {
   suggestedPropertyId: string | null;
   suggestedMatchReason: string | null;
   proposedChanges: Record<string, { from: unknown; to: unknown }> | null;
-  corridorName: string | null;
   marketName: string | null;
   suggestedPropertyName: string | null;
   reviewedByLabel: string | null;
@@ -61,13 +59,6 @@ interface Scan {
   jobError: string | null;
   jobCancelRequested: string | Date | null;
 }
-
-const GEO_LABELS: Record<string, { label: string; color: string; hint: string }> = {
-  inside: { label: 'Inside corridor', color: '#15803d', hint: 'Coordinates fall inside the saved boundary.' },
-  edge: { label: 'Near the boundary', color: '#b45309', hint: 'Just outside the saved boundary — worth a look before approving.' },
-  outside: { label: 'Outside corridor', color: '#b91c1c', hint: 'Outside the saved boundary. Check before approving.' },
-  unknown: { label: 'Location unknown', color: '#64748b', hint: 'No usable coordinates, so relevance could not be checked.' },
-};
 
 const STATUS_TABS = [
   { key: 'new', label: 'To review' },
@@ -198,7 +189,7 @@ export function DiscoveryInbox({
             <Spinner className="mt-px shrink-0" />
             <span>
               A scan is {activeScan.status}
-              {activeScan.targetsTotal > 0 && ` — ${activeScan.targetsCompleted} of ${activeScan.targetsTotal} corridors done`}
+              {activeScan.targetsTotal > 0 && ` — ${activeScan.targetsCompleted} of ${activeScan.targetsTotal} markets done`}
               {activeScan.jobCancelRequested && ' (cancelling…)'}
               . It runs in the background; you can keep working.
             </span>
@@ -219,15 +210,13 @@ export function DiscoveryInbox({
               title={activeStatus === 'new' ? 'Nothing to review' : 'No results here'}
               body={
                 ai.configured
-                  ? 'Run "Find New Listings" from a corridor or market to search for properties offered for sale. You can also submit a listing URL or upload a flyer.'
-                  : 'Discovery scans need an API key, but you can still add properties by hand from any corridor workspace.'
+                  ? 'Run "Find New Listings" from a market to search for properties offered for sale. You can also submit a listing URL or upload a flyer.'
+                  : 'Discovery scans need an API key, but you can still add properties by hand from any market workspace.'
               }
             />
           ) : (
             <ul className="divide-y divide-ink-100">
-              {results.map((r) => {
-                const geo = GEO_LABELS[r.geoRelevance] ?? GEO_LABELS.unknown!;
-                return (
+              {results.map((r) => (
                   <li key={r.id}>
                     <button
                       type="button"
@@ -246,8 +235,7 @@ export function DiscoveryInbox({
                         {[r.addressLine1, r.city, r.state].filter(Boolean).join(', ') || 'No address extracted'}
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-1">
-                        <StatusChip label={geo.label} color={geo.color} title={geo.hint} />
-                        {r.suggestedPropertyId && (
+                                      {r.suggestedPropertyId && (
                           <span className="chip border-accent-200 bg-accent-50 text-accent-700">Possible match</span>
                         )}
                         {r.timesSeen > 1 && (
@@ -264,12 +252,11 @@ export function DiscoveryInbox({
                         )}
                       </div>
                       <div className="mt-0.5 text-[11px] text-ink-400">
-                        {r.corridorName ?? r.marketName ?? 'No corridor'} · first seen {formatDate(r.firstSeenAt)}
+                        {r.marketName ?? 'No market'} · first seen {formatDate(r.firstSeenAt)}
                       </div>
                     </button>
                   </li>
-                );
-              })}
+              ))}
             </ul>
           )}
         </div>
@@ -318,7 +305,6 @@ function ReviewCard({
 }) {
   const [marketId, setMarketId] = useState('');
   const [note, setNote] = useState('');
-  const geo = GEO_LABELS[result.geoRelevance] ?? GEO_LABELS.unknown!;
   const reviewed = ['approved', 'linked', 'rejected', 'archived'].includes(result.status);
   const proposed = Object.entries(result.proposedChanges ?? {});
 
@@ -332,14 +318,13 @@ function ReviewCard({
               {[result.addressLine1, result.city, result.state].filter(Boolean).join(', ') || 'No address extracted'}
             </p>
           </div>
-          <StatusChip label={geo.label} color={geo.color} title={geo.hint} />
         </div>
 
         <div className="space-y-4 p-4">
-          {result.geoRelevance !== 'inside' && (
+          {result.geoNote && (
             <div className="banner-warn">
               <TriangleAlert size={14} className="mt-px shrink-0" />
-              <span>{geo.hint}{result.geoNote ? ` ${result.geoNote}` : ''}</span>
+              <span>{result.geoNote}</span>
             </div>
           )}
 
@@ -582,7 +567,7 @@ function ScanHistory({ scans }: { scans: Scan[] }) {
           <li key={s.id} className="px-4 py-2.5">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-xs font-medium text-ink-800">
-                {s.scope === 'all' ? 'All markets' : s.scope === 'corridor' ? 'One corridor' : `${s.targetsTotal} corridors`}
+                {s.scope === 'all' ? 'All markets' : s.scope === 'market' ? 'One market' : `${s.targetsTotal} markets`}
               </span>
               <StatusChip
                 label={s.status}
@@ -595,7 +580,7 @@ function ScanHistory({ scans }: { scans: Scan[] }) {
               />
             </div>
             <div className="text-[11px] text-ink-500">
-              {s.targetsCompleted}/{s.targetsTotal} corridors · {s.resultsNew} new of {s.resultsFound} found ·{' '}
+              {s.targetsCompleted}/{s.targetsTotal} markets · {s.resultsNew} new of {s.resultsFound} found ·{' '}
               {formatDateTime(s.createdAt)}
               {s.requestedByLabel ? ` · ${s.requestedByLabel}` : ''}
             </div>

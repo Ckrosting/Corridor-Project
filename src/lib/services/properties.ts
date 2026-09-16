@@ -2,9 +2,9 @@ import '@/lib/server-guard';
 import { and, asc, desc, eq, inArray, isNull, or, sql as raw, type SQL } from 'drizzle-orm';
 import { db } from '@/db';
 import {
-  activities, attachments, contacts, corridors, customFieldDefs, customFieldValues,
+  activities, attachments, contacts, customFieldDefs, customFieldValues,
   markets, opportunities, opportunityProperties, outreachStatuses, ownerEntities, properties,
-  propertyContacts, propertyCorridors, propertyListingSources, propertyParcels,
+  propertyContacts, propertyListingSources, propertyParcels,
   propertyPriceHistory, propertyTags, tags, transactionStages,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
@@ -14,11 +14,9 @@ import { areaAcres, computeBBox, validateAreaGeometry } from '@/lib/geo/polygon'
 import { lookupCountyParcel, type CountyParcelMatch } from '@/lib/geo/county-parcels';
 import { traceParcelFromTiles, type TracedParcel } from '@/lib/geo/parcel-trace';
 import { diffFields, recordAudit, updateWithVersion } from './audit';
-import { recomputeMembershipForProperty } from './corridors';
 
 export interface PropertyFilters {
   marketId?: string;
-  corridorId?: string;
   outreachStatusIds?: string[];
   listingStatuses?: string[];
   propertyTypes?: string[];
@@ -52,11 +50,6 @@ function buildWhere(f: PropertyFilters): SQL[] {
     conds.push(sqlIn(raw`properties.listing_status::text`, f.listingStatuses));
   }
   if (f.propertyTypes?.length) conds.push(inArray(properties.propertyType, f.propertyTypes));
-
-  if (f.corridorId) {
-    conds.push(raw`exists (select 1 from property_corridors pc
-      where pc.property_id = properties.id and pc.corridor_id = ${f.corridorId})`);
-  }
 
   if (f.tagIds?.length) {
     conds.push(raw`exists (select 1 from property_tags pt
@@ -172,17 +165,19 @@ export async function getPropertyDetail(id: string) {
     .select({
       p: properties,
       outreachStatus: { id: outreachStatuses.id, label: outreachStatuses.label, color: outreachStatuses.color },
+      market: { id: markets.id, name: markets.name },
       ownerEntity: { id: ownerEntities.id, name: ownerEntities.name, entityType: ownerEntities.entityType, mailingAddress: ownerEntities.mailingAddress, notes: ownerEntities.notes },
     })
     .from(properties)
     .leftJoin(outreachStatuses, eq(outreachStatuses.id, properties.outreachStatusId))
+    .leftJoin(markets, eq(markets.id, properties.marketId))
     .leftJoin(ownerEntities, eq(ownerEntities.id, properties.ownerEntityId))
     .where(eq(properties.id, id))
     .limit(1);
 
   if (!property) throw new NotFoundError('Property');
 
-  const [parcels, contactLinks, corridorLinks, tagLinks, timeline, listingSources, files, priceHistory, opportunityLink, customValues, customDefs] =
+  const [parcels, contactLinks, tagLinks, timeline, listingSources, files, priceHistory, opportunityLink, customValues, customDefs] =
     await Promise.all([
       db.select().from(propertyParcels).where(eq(propertyParcels.propertyId, id)).orderBy(asc(propertyParcels.createdAt)),
 
@@ -196,15 +191,6 @@ export async function getPropertyDetail(id: string) {
         .innerJoin(contacts, eq(contacts.id, propertyContacts.contactId))
         .where(eq(propertyContacts.propertyId, id))
         .orderBy(desc(propertyContacts.isPrimary), asc(contacts.name)),
-
-      db.select({
-        id: corridors.id, name: corridors.name, color: corridors.color,
-        marketId: corridors.marketId, assignedVia: propertyCorridors.assignedVia,
-      })
-        .from(propertyCorridors)
-        .innerJoin(corridors, eq(corridors.id, propertyCorridors.corridorId))
-        .where(eq(propertyCorridors.propertyId, id))
-        .orderBy(asc(corridors.name)),
 
       db.select({ id: tags.id, name: tags.name, color: tags.color })
         .from(propertyTags).innerJoin(tags, eq(tags.id, propertyTags.tagId))
@@ -253,10 +239,10 @@ export async function getPropertyDetail(id: string) {
   return {
     ...property.p,
     outreachStatus: property.outreachStatus?.id ? property.outreachStatus : null,
+    market: property.market?.id ? property.market : null,
     ownerEntity: property.ownerEntity?.id ? property.ownerEntity : null,
     parcels,
     contacts: contactLinks,
-    corridors: corridorLinks,
     tags: tagLinks,
     timeline: timeline.map((t) => ({ ...t.a, contactName: t.contactName })),
     listingSources,
@@ -282,10 +268,10 @@ async function defaultOutreachStatusId(): Promise<string | null> {
 }
 
 export async function createProperty(
-  input: Record<string, unknown> & { marketId: string; tagIds?: string[]; corridorIds?: string[] },
+  input: Record<string, unknown> & { marketId: string; tagIds?: string[] },
   actor: Actor,
 ) {
-  const { tagIds, corridorIds, ...rest } = input;
+  const { tagIds, ...rest } = input;
   const fields = rest as Record<string, unknown>;
 
   const values: Record<string, unknown> = {
@@ -309,14 +295,6 @@ export async function createProperty(
 
   if (tagIds?.length) {
     await db.insert(propertyTags).values(tagIds.map((tagId) => ({ propertyId: row!.id, tagId }))).onConflictDoNothing();
-  }
-
-  // Auto membership from geometry, plus any corridors the user pinned explicitly.
-  await recomputeMembershipForProperty(row!.id);
-  if (corridorIds?.length) {
-    await db.insert(propertyCorridors)
-      .values(corridorIds.map((corridorId) => ({ propertyId: row!.id, corridorId, assignedVia: 'manual' })))
-      .onConflictDoNothing();
   }
 
   await recordAudit({
@@ -423,10 +401,10 @@ export async function attachTracedParcel(propertyId: string, traced: TracedParce
 
 export async function updateProperty(
   id: string,
-  input: Record<string, unknown> & { version: number; tagIds?: string[]; corridorIds?: string[]; customFields?: Record<string, unknown> },
+  input: Record<string, unknown> & { version: number; tagIds?: string[]; customFields?: Record<string, unknown> },
   actor: Actor,
 ) {
-  const { version, tagIds, corridorIds, customFields, ...patch } = input;
+  const { version, tagIds, customFields, ...patch } = input;
 
   const [before] = await db.select().from(properties).where(eq(properties.id, id)).limit(1);
   if (!before) throw new NotFoundError('Property');
@@ -470,23 +448,11 @@ export async function updateProperty(
   }
 
   if (customFields) await setCustomFieldValues(id, customFields, actor);
-  if (coordsTouched) await recomputeMembershipForProperty(id);
 
   // Only when the property had no parcel yet - never silently replace a
   // human-drawn or already-matched parcel just because coordinates changed.
   if (coordsTouched && before.needsParcelOutline && updated.latitude != null && updated.longitude != null) {
     await tryAutoMatchCountyParcel(id, updated.marketId, updated.latitude, updated.longitude, actor);
-  }
-
-  if (corridorIds) {
-    await db.delete(propertyCorridors).where(and(
-      eq(propertyCorridors.propertyId, id), eq(propertyCorridors.assignedVia, 'manual'),
-    ));
-    if (corridorIds.length) {
-      await db.insert(propertyCorridors)
-        .values(corridorIds.map((corridorId) => ({ propertyId: id, corridorId, assignedVia: 'manual' })))
-        .onConflictDoNothing();
-    }
   }
 
   if (Object.keys(changes).length > 0) {

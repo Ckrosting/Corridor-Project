@@ -93,9 +93,9 @@ keys are satisfiable as the rows go in.
 ### Verified
 
 A real round trip was performed during development: a 914-row backup was restored
-into a scratch database and compared against the source. Corridor GeoJSON
+into a scratch database and compared against the source. Parcel GeoJSON
 geometry, the denormalised bbox columns, `numeric` precision, NULL-versus-zero,
-timestamps, and many-to-many corridor links were all identical.
+and timestamps were all identical.
 
 ---
 
@@ -125,7 +125,7 @@ protection, but OneDrive is not a backup system — it replicates deletions.
 **Accidentally deleted records**
 
 Most destructive actions in the application archive rather than delete —
-properties, corridors, contacts, statuses, custom fields and attachments all have
+properties, markets, contacts, statuses, custom fields and attachments all have
 an `archived_at` column and keep their history. Check whether the record is merely
 archived before reaching for a backup. The `audit_log` table records who changed
 what and when, which usually identifies what happened faster than a restore does.

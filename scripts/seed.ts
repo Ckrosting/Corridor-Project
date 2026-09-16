@@ -15,11 +15,11 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { and, eq, sql as raw } from 'drizzle-orm';
 import postgres from 'postgres';
 import * as schema from '../src/db/schema';
-import { areaAcres, circleToPolygon, computeBBox, validateAreaGeometry } from '../src/lib/geo/polygon';
+import { areaAcres, computeBBox, validateAreaGeometry } from '../src/lib/geo/polygon';
 
 const {
   users, appSettings, outreachStatuses, transactionStages, markets, mallAnchors,
-  corridors, properties, propertyParcels, propertyCorridors, contacts, ownerEntities,
+  properties, propertyParcels, contacts, ownerEntities,
   propertyContacts, activities, tags, propertyTags, opportunities, opportunityProperties,
   opportunityStageHistory, discoveryResults, customFieldDefs,
 } = schema;
@@ -55,10 +55,7 @@ const DEFAULT_SETTINGS: Array<{ key: string; value: unknown }> = [
       'Land - Commercial', 'Multifamily', 'Hospitality', 'Medical', 'Mixed Use', 'Other',
     ],
   },
-  // How far outside a corridor boundary a discovery candidate may sit and still be
   // flagged 'edge' for human review rather than discarded as outside.
-  { key: 'corridor_edge_buffer_meters', value: 500 },
-  { key: 'default_corridor_radius_meters', value: 1609 },
   {
     // Estimated USD per million tokens, used only to report APPROXIMATE spend.
     // Matches Claude Sonnet 5 list pricing at the time of writing; admins can
@@ -181,38 +178,6 @@ async function main() {
       createdBy: adminUser?.id,
     }).returning();
 
-    // Two deliberately OVERLAPPING corridors, so the "one property, many corridors"
-    // behaviour is visible in the demo data.
-    const ringA = circleToPolygon(anchorPoint, 1609);
-    const bboxA = computeBBox(ringA);
-    const [corridorA] = await db.insert(corridors).values({
-      marketId: market!.id, name: 'Riverbend Mall Ring (1 mi)',
-      description: 'Radius corridor seeded from the mall anchor.',
-      boundaryKind: 'radius', anchorId: anchor!.id,
-      centerLatitude: anchorPoint.lat, centerLongitude: anchorPoint.lng, radiusMeters: 1609,
-      boundary: ringA, boundarySource: 'radius', color: '#2563eb',
-      minLatitude: bboxA.minLat, maxLatitude: bboxA.maxLat,
-      minLongitude: bboxA.minLng, maxLongitude: bboxA.maxLng,
-      createdBy: adminUser?.id, sortOrder: 10,
-    }).returning();
-
-    const drawn = validateAreaGeometry({
-      type: 'Polygon',
-      coordinates: [[
-        [-82.0900, 33.4700], [-82.0600, 33.4700],
-        [-82.0600, 33.4850], [-82.0900, 33.4850], [-82.0900, 33.4700],
-      ]],
-    });
-    const bboxB = computeBBox(drawn);
-    const [corridorB] = await db.insert(corridors).values({
-      marketId: market!.id, name: 'Washington Road Retail Strip',
-      description: 'Hand-drawn research outline. Approximate - not a surveyed boundary.',
-      boundaryKind: 'custom', boundary: drawn, boundarySource: 'manual_draw', color: '#7c3aed',
-      minLatitude: bboxB.minLat, maxLatitude: bboxB.maxLat,
-      minLongitude: bboxB.minLng, maxLongitude: bboxB.maxLng,
-      createdBy: adminUser?.id, sortOrder: 20,
-    }).returning();
-
     const [ownerEntity] = await db.insert(ownerEntities).values({
       name: 'SAMPLE - Maple Ridge Holdings, LLC',
       entityType: 'LLC',
@@ -267,7 +232,7 @@ async function main() {
         askingPrice: null, target: null, sellerIndicated: null,
         noi: null, capReported: null, sqft: 31000, acres: '3.4000',
         occupancy: null, tenants: null,
-        notes: 'Spotted while driving the corridor. No ownership research done yet.',
+        notes: 'Spotted while driving the market. No ownership research done yet.',
         followUpDays: null,
       },
     ];
@@ -347,14 +312,6 @@ async function main() {
       createdBy: adminUser?.id,
     });
 
-    // Corridor membership. Property 1 sits in BOTH corridors - one record, two links.
-    await db.insert(propertyCorridors).values([
-      { propertyId: propIds[0]!, corridorId: corridorA!.id, assignedVia: 'auto' },
-      { propertyId: propIds[0]!, corridorId: corridorB!.id, assignedVia: 'auto' },
-      { propertyId: propIds[1]!, corridorId: corridorB!.id, assignedVia: 'auto' },
-      { propertyId: propIds[2]!, corridorId: corridorA!.id, assignedVia: 'auto' },
-    ]).onConflictDoNothing();
-
     if (tagHighPriority) {
       await db.insert(propertyTags).values({ propertyId: propIds[0]!, tagId: tagHighPriority.id }).onConflictDoNothing();
     }
@@ -428,10 +385,10 @@ async function main() {
     await db.insert(customFieldDefs).values({
       entity: 'property', key: 'drive_by_condition', label: 'Drive-by Condition',
       type: 'select', options: ['Excellent', 'Good', 'Fair', 'Poor', 'Not assessed'],
-      helpText: 'Visual condition noted during a corridor drive-by.', sortOrder: 10,
+      helpText: 'Visual condition noted during a drive-by.', sortOrder: 10,
     }).onConflictDoNothing();
 
-    console.log(`[seed] Sample data: 1 market, 1 anchor, 2 overlapping corridors, ${createdProps} properties, 4 parcels, 2 contacts, 3 calls, 1 opportunity`);
+    console.log(`[seed] Sample data: 1 market, 1 anchor, ${createdProps} properties, 4 parcels, 2 contacts, 3 calls, 1 opportunity`);
     console.log('[seed] All sample records are prefixed "SAMPLE" and flagged is_sample=true.');
   } catch (err) {
     console.error('[seed] FAILED:', err);

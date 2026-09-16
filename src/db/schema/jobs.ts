@@ -31,7 +31,7 @@ export const jobs = pgTable(
     /**
      * Guards against duplicate concurrent work. A partial unique index below
      * allows only ONE non-terminal job per key, so double-clicking "Find New
-     * Listings" for a corridor cannot start two scans.
+     * Listings" for a market cannot start two scans.
      */
     dedupeKey: text('dedupe_key'),
 

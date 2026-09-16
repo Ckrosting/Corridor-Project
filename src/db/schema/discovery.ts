@@ -3,23 +3,23 @@ import {
   text, timestamp, uniqueIndex, uuid,
 } from 'drizzle-orm/pg-core';
 import { users } from './auth';
-import { corridors, markets } from './geo';
+import { markets } from './geo';
 import { properties } from './property';
 import { jobs } from './jobs';
 import {
-  discoveryStatusEnum, geoRelevanceEnum, importKindEnum, importStatusEnum,
+  discoveryStatusEnum, importKindEnum, importStatusEnum,
   jobStatusEnum, scanScopeEnum,
 } from './enums';
 
-/** One user-initiated "Find New Listings" run, covering one or many corridors. */
+/** One user-initiated "Find New Listings" run, covering one or many markets. */
 export const scans = pgTable(
   'scans',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }),
     scope: scanScopeEnum('scope').notNull(),
-    /** Corridor ids resolved from the scope at queue time. */
-    corridorIds: jsonb('corridor_ids').$type<string[]>().notNull(),
+    /** Market ids resolved from the scope at queue time. */
+    marketIds: jsonb('market_ids').$type<string[]>().notNull(),
     status: jobStatusEnum('status').notNull().default('queued'),
 
     model: text('model').notNull(),
@@ -47,14 +47,14 @@ export const scans = pgTable(
   ],
 );
 
-/** Per-corridor progress within a scan, so a partial failure is visible and precise. */
+/** Per-market progress within a scan, so a partial failure is visible and precise. */
 export const scanTargets = pgTable(
   'scan_targets',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     scanId: uuid('scan_id').notNull().references(() => scans.id, { onDelete: 'cascade' }),
-    corridorId: uuid('corridor_id').references(() => corridors.id, { onDelete: 'set null' }),
-    corridorLabel: text('corridor_label'),
+    marketId: uuid('market_id').references(() => markets.id, { onDelete: 'set null' }),
+    marketLabel: text('market_label'),
     status: jobStatusEnum('status').notNull().default('queued'),
     resultsFound: integer('results_found').notNull().default(0),
     /** Domains/queries actually reached, plus anything blocked or unavailable. */
@@ -80,7 +80,6 @@ export const discoveryResults = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     scanId: uuid('scan_id').references(() => scans.id, { onDelete: 'set null' }),
-    corridorId: uuid('corridor_id').references(() => corridors.id, { onDelete: 'set null' }),
     marketId: uuid('market_id').references(() => markets.id, { onDelete: 'set null' }),
 
     status: discoveryStatusEnum('status').notNull().default('new'),
@@ -100,6 +99,17 @@ export const discoveryResults = pgTable(
     askingPrice: numeric('asking_price', { precision: 14, scale: 2 }),
     buildingSqft: integer('building_sqft'),
     landAcreage: numeric('land_acreage', { precision: 12, scale: 4 }),
+
+    /**
+     * Deal metrics, when the source states them. Types mirror `properties`
+     * exactly so approving a candidate copies them across unchanged.
+     */
+    noi: numeric('noi', { precision: 14, scale: 2 }),
+    /** A percentage as stated: 6.5 is 6.5%. Never a rate we computed ourselves. */
+    capRateReported: numeric('cap_rate_reported', { precision: 6, scale: 3 }),
+    yearBuilt: integer('year_built'),
+    tenantInfo: text('tenant_info'),
+
     /** Only populated when a source states it. Never the scan date. */
     listingDate: date('listing_date'),
     ownerName: text('owner_name'),
@@ -119,8 +129,7 @@ export const discoveryResults = pgTable(
     sources: jsonb('sources').$type<Array<{ url: string; title?: string | null; sourceName?: string | null }>>(),
     evidenceExcerpt: text('evidence_excerpt'),
 
-    /* ---- Geographic relevance against the saved corridor boundary ---- */
-    geoRelevance: geoRelevanceEnum('geo_relevance').notNull().default('unknown'),
+    /** The source's own note about where this candidate is, kept for the reviewer. */
     geoNote: text('geo_note'),
 
     /* ---- Deduplication ---- */
@@ -156,7 +165,7 @@ export const discoveryResults = pgTable(
   },
   (t) => [
     index('discovery_status_idx').on(t.status, t.createdAt),
-    index('discovery_corridor_idx').on(t.corridorId),
+    index('discovery_market_idx').on(t.marketId),
     index('discovery_scan_idx').on(t.scanId),
     index('discovery_norm_url_idx').on(t.normalizedUrl),
     index('discovery_dedupe_idx').on(t.dedupeHash),
@@ -194,7 +203,7 @@ export const aiUsage = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     scanId: uuid('scan_id').references(() => scans.id, { onDelete: 'set null' }),
     model: text('model').notNull(),
-    operation: text('operation').notNull(), // scan_corridor | url_extract | document_extract
+    operation: text('operation').notNull(), // scan_market | url_extract | document_extract
     inputTokens: integer('input_tokens').notNull().default(0),
     outputTokens: integer('output_tokens').notNull().default(0),
     cacheReadTokens: integer('cache_read_tokens').notNull().default(0),

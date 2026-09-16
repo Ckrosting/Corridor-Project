@@ -25,7 +25,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
-  { href: '/markets', label: 'Markets & Corridors', icon: Map },
+  { href: '/markets', label: 'Markets', icon: Map },
   { href: '/properties', label: 'Properties', icon: Building2 },
   { href: '/follow-ups', label: 'Follow-ups', icon: CalendarClock, badge: 'followUpsDue' },
   { href: '/pipeline', label: 'Pipeline', icon: TrendingUp, badge: 'pipelineActive' },

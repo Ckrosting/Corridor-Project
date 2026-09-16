@@ -18,7 +18,6 @@ export const maxDuration = 300;
 
 const urlSchema = z.object({
   url: z.string().trim().min(4).max(2000),
-  corridorId: z.string().uuid().nullish(),
   marketId: z.string().uuid().nullish(),
 });
 
@@ -57,7 +56,6 @@ export const POST = route(async (req: Request) => {
     const rates = await preflight();
     const form = await req.formData();
     const file = form.get('file');
-    const corridorId = (form.get('corridorId') as string) || null;
     const marketId = (form.get('marketId') as string) || null;
 
     if (!(file instanceof File)) throw new AppError(400, 'Choose a flyer or offering memorandum to upload.', 'no_file');
@@ -87,7 +85,7 @@ export const POST = route(async (req: Request) => {
 
     const staged = await stageCandidates({
       candidates: outcome.result.candidates,
-      scanId: null, corridorId, marketId, origin: 'manual_document',
+      scanId: null, marketId, origin: 'manual_document',
     });
 
     return ok({ staged, notes: [...outcome.result.coverageNotes, ...outcome.notes] }, 201);
@@ -112,7 +110,6 @@ export const POST = route(async (req: Request) => {
   const staged = await stageCandidates({
     candidates: outcome.result.candidates,
     scanId: null,
-    corridorId: input.corridorId ?? null,
     marketId: input.marketId ?? null,
     origin: 'manual_url',
   });

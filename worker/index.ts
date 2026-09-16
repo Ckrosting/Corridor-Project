@@ -49,10 +49,10 @@ async function handle(job: ClaimedJob): Promise<void> {
 
         const summary = await runScan(scanId, job.id);
 
-        // 'failed' from runScan means every corridor failed; surface it as a job
+        // 'failed' from runScan means every market failed; surface it as a job
         // failure so the retry policy applies.
         if (summary.status === 'failed') {
-          throw new Error(summary.coverageNotes[0] ?? 'Every corridor in this scan failed.');
+          throw new Error(summary.coverageNotes[0] ?? 'Every market in this scan failed.');
         }
 
         await completeJob(job.id, summary.status === 'cancelled' ? 'cancelled' : summary.status, {

@@ -11,7 +11,6 @@ export const GET = route(async (req: Request) => {
   return ok({
     opportunities: await listOpportunities({
       marketId: sp.get('marketId') ?? undefined,
-      corridorId: sp.get('corridorId') ?? undefined,
       includeTerminal: sp.get('includeTerminal') === 'true',
       includeRemoved: sp.get('includeRemoved') === 'true',
       includeSample: sp.get('includeSample') !== 'false',

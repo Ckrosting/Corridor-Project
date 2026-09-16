@@ -2,13 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import {
-  activities, corridors, opportunities, opportunityProperties, properties,
-  propertyCorridors, propertyParcels,
+  activities, opportunities, opportunityProperties, properties,
+  propertyParcels,
 } from '@/db/schema';
 import {
   createParcel, createProperty, getPropertyDetail, updateParcel, updateProperty,
 } from '@/lib/services/properties';
-import { recomputeCorridorMembership, updateCorridor } from '@/lib/services/corridors';
 import {
   changeOutreachStatus, getContactedButNotPromoted, getFollowUps, logActivity, setFollowUp,
 } from '@/lib/services/activities';
@@ -17,7 +16,7 @@ import { ConflictError } from '@/lib/errors';
 import { areaAcres, pointInGeometry } from '@/lib/geo/polygon';
 import type { Actor } from '@/lib/auth/guards';
 import {
-  cleanupTestData, createRadiusCorridor, createTestMarket, ensureBaseline,
+  cleanupTestData, createTestMarket, ensureBaseline,
   squareAround, stageByKey, statusByKey, testActor,
 } from './helpers';
 
@@ -41,56 +40,8 @@ afterAll(async () => {
 });
 
 /* ========================================================================== */
-/* Corridor and parcel persistence                                            */
+/* Parcel persistence                                                         */
 /* ========================================================================== */
-
-describe('corridor boundary persistence', () => {
-  it('stores a radius boundary as a polygon and reloads it intact', async () => {
-    const market = await createTestMarket('Radius');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
-
-    const [reloaded] = await db.select().from(corridors).where(eq(corridors.id, corridor.id));
-    expect(reloaded!.boundary).toBeTruthy();
-    expect(reloaded!.boundary!.type).toBe('Polygon');
-    // bbox columns are populated for the viewport index
-    expect(reloaded!.minLatitude).toBeLessThan(ANCHOR.lat);
-    expect(reloaded!.maxLatitude).toBeGreaterThan(ANCHOR.lat);
-    expect(pointInGeometry(reloaded!.boundary!, ANCHOR)).toBe(true);
-  });
-
-  it('persists a hand-drawn boundary and survives a reload', async () => {
-    const market = await createTestMarket('Drawn');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
-
-    const drawn = squareAround(ANCHOR, 0.004);
-    await updateCorridor(corridor.id, { boundary: drawn, boundaryKind: 'custom', version: corridor.version }, actor);
-
-    const [reloaded] = await db.select().from(corridors).where(eq(corridors.id, corridor.id));
-    expect(reloaded!.boundaryKind).toBe('custom');
-    expect(reloaded!.boundarySource).toBe('manual_draw');
-    // Ring is closed and normalised on the way in.
-    expect(reloaded!.boundary!.coordinates[0]).toHaveLength(5);
-    expect(reloaded!.version).toBe(corridor.version + 1);
-    // The radius parameters are retained so the user can switch back.
-    expect(reloaded!.radiusMeters).toBe(1609);
-  });
-
-  it('rejects invalid geometry rather than storing it', async () => {
-    const market = await createTestMarket('Invalid');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
-
-    await expect(
-      updateCorridor(corridor.id, {
-        boundary: { type: 'Polygon', coordinates: [[[0, 0], [1, 1]]] },
-        boundaryKind: 'custom',
-        version: corridor.version,
-      }, actor),
-    ).rejects.toThrow();
-
-    const [unchanged] = await db.select().from(corridors).where(eq(corridors.id, corridor.id));
-    expect(unchanged!.boundaryKind).toBe('radius');
-  });
-});
 
 describe('parcel persistence', () => {
   it('saves a drawn parcel, derives acreage, and reloads it', async () => {
@@ -162,84 +113,6 @@ describe('parcel persistence', () => {
     expect(after!.needsParcelOutline).toBe(false);
   });
 });
-
-/* ========================================================================== */
-/* Overlapping corridors                                                      */
-/* ========================================================================== */
-
-describe('overlapping corridors', () => {
-  it('links ONE property record to every containing corridor without duplicating it', async () => {
-    const market = await createTestMarket('Overlap');
-    // Three corridors that all contain the anchor point.
-    const a = await createRadiusCorridor(market.id, ANCHOR, 1609, 'Ring A');
-    const b = await createRadiusCorridor(market.id, { lat: ANCHOR.lat + 0.002, lng: ANCHOR.lng }, 1609, 'Ring B');
-    const c = await createRadiusCorridor(market.id, { lat: ANCHOR.lat, lng: ANCHOR.lng + 0.002 }, 1609, 'Ring C');
-    // And one that does not.
-    const far = await createRadiusCorridor(market.id, { lat: ANCHOR.lat + 0.5, lng: ANCHOR.lng }, 1609, 'Far');
-
-    const property = await createProperty({
-      marketId: market.id, name: 'Overlapping', latitude: ANCHOR.lat, longitude: ANCHOR.lng,
-    }, actor);
-
-    const links = await db.select().from(propertyCorridors).where(eq(propertyCorridors.propertyId, property.id));
-    expect(links.map((l) => l.corridorId).sort()).toEqual([a.id, b.id, c.id].sort());
-    expect(links.map((l) => l.corridorId)).not.toContain(far.id);
-
-    // Exactly one property row backs all three memberships.
-    const rows = await db.select().from(properties).where(eq(properties.marketId, market.id));
-    expect(rows).toHaveLength(1);
-
-    // Its contacts, notes and history live on that single record.
-    const detail = await getPropertyDetail(property.id);
-    expect(detail.corridors).toHaveLength(3);
-    expect(detail.id).toBe(property.id);
-  });
-
-  it('recomputes membership when a boundary moves, keeping manual assignments', async () => {
-    const market = await createTestMarket('Recompute');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
-
-    const inside = await createProperty({ marketId: market.id, name: 'Inside', latitude: ANCHOR.lat, longitude: ANCHOR.lng }, actor);
-    const outside = await createProperty({ marketId: market.id, name: 'Outside', latitude: ANCHOR.lat + 0.1, longitude: ANCHOR.lng }, actor);
-
-    // A deliberate manual pin on a property that is geographically outside.
-    await db.insert(propertyCorridors).values({
-      propertyId: outside.id, corridorId: corridor.id, assignedVia: 'manual',
-    });
-
-    const result = await recomputeCorridorMembership(corridor.id);
-    expect(result.kept).toBe(1);
-
-    const links = await db.select().from(propertyCorridors).where(eq(propertyCorridors.corridorId, corridor.id));
-    const byProperty = Object.fromEntries(links.map((l) => [l.propertyId, l.assignedVia]));
-    expect(byProperty[inside.id]).toBe('auto');
-    // The manual link survived a recompute that would otherwise have dropped it.
-    expect(byProperty[outside.id]).toBe('manual');
-  });
-
-  it('drops a property from a corridor when it moves out of the boundary', async () => {
-    const market = await createTestMarket('Move');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
-    const property = await createProperty({ marketId: market.id, latitude: ANCHOR.lat, longitude: ANCHOR.lng }, actor);
-
-    expect(await linkCount(property.id, corridor.id)).toBe(1);
-
-    const [current] = await db.select().from(properties).where(eq(properties.id, property.id));
-    await updateProperty(property.id, {
-      latitude: ANCHOR.lat + 0.2, longitude: ANCHOR.lng, version: current!.version,
-    }, actor);
-
-    expect(await linkCount(property.id, corridor.id)).toBe(0);
-  });
-});
-
-async function linkCount(propertyId: string, corridorId: string) {
-  const rows = await db.select().from(propertyCorridors).where(and(
-    eq(propertyCorridors.propertyId, propertyId),
-    eq(propertyCorridors.corridorId, corridorId),
-  ));
-  return rows.length;
-}
 
 /* ========================================================================== */
 /* Call history and follow-ups                                                */

@@ -254,7 +254,7 @@ export const areaAcres = (geometry: AreaGeometry): number => areaSqMeters(geomet
 /* -------------------------------------------------------------------------- */
 
 /**
- * Approximates a circle as a polygon, so that a radius-based corridor and a
+ * Approximates a circle as a polygon, so that a radius-derived area and a
  * hand-drawn one are the same shape of data and share one containment code path.
  */
 export function circleToPolygon(center: LatLng, radiusMeters: number, steps = 64): Polygon {
@@ -282,13 +282,13 @@ export function circleToPolygon(center: LatLng, radiusMeters: number, steps = 64
 }
 
 /* -------------------------------------------------------------------------- */
-/* Corridor relevance                                                         */
+/* Area relevance                                                             */
 /* -------------------------------------------------------------------------- */
 
 export type Relevance = 'inside' | 'edge' | 'outside' | 'unknown';
 
 /**
- * Decides whether a candidate location belongs to a corridor.
+ * Decides whether a candidate location belongs to an area.
  *
  * Anything without usable coordinates returns 'unknown', and anything within
  * `edgeBufferMeters` outside the boundary returns 'edge'. Both are routed to

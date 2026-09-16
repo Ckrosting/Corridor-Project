@@ -13,7 +13,7 @@ import { logActivity } from '@/lib/services/activities';
 import type { Candidate } from '@/lib/ai/extraction';
 import type { Actor } from '@/lib/auth/guards';
 import {
-  cleanupTestData, createRadiusCorridor, createTestMarket, ensureBaseline, testActor,
+  cleanupTestData, createTestMarket, ensureBaseline, testActor,
 } from './helpers';
 
 let actor: Actor;
@@ -177,40 +177,38 @@ describe('match scoring', () => {
 describe('repeated scans do not create duplicates', () => {
   it('records a candidate once and only bumps last-seen on a repeat', async () => {
     const market = await createTestMarket('DiscoDupe');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
     const same = () => candidate({
       addressLine1: addr(101),
       sources: [{ url: src('dupe-1'), title: null, sourceName: null }],
     });
 
     const first = await stageCandidates({
-      candidates: [same()], scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      candidates: [same()], scanId: null, marketId: market.id, origin: 'scan',
     });
     expect(first.created).toBe(1);
 
     // The same listing surfaced by a second scan.
     const second = await stageCandidates({
-      candidates: [same()], scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      candidates: [same()], scanId: null, marketId: market.id, origin: 'scan',
     });
     expect(second.created).toBe(0);
     expect(second.duplicates).toBe(1);
 
     const staged = await db.select().from(discoveryResults)
-      .where(eq(discoveryResults.corridorId, corridor.id));
+      .where(eq(discoveryResults.marketId, market.id));
     expect(staged).toHaveLength(1);
     expect(staged[0]!.timesSeen).toBe(2);
   });
 
   it('deduplicates the same property found at two different URLs', async () => {
     const market = await createTestMarket('DiscoCrossSource');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
 
     await stageCandidates({
       candidates: [candidate({
         addressLine1: addr(102),
         sources: [{ url: src('site-a'), title: null, sourceName: 'A' }],
       })],
-      scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      scanId: null, marketId: market.id, origin: 'scan',
     });
 
     // Different site, same street address written differently - the address hash
@@ -222,7 +220,7 @@ describe('repeated scans do not create duplicates', () => {
         addressLine1: addr(102).replace('Parkway', 'Pkwy.'),
         sources: [{ url: src('site-b'), title: null, sourceName: 'B' }],
       })],
-      scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      scanId: null, marketId: market.id, origin: 'scan',
     });
 
     expect(second.created).toBe(0);
@@ -231,7 +229,6 @@ describe('repeated scans do not create duplicates', () => {
 
   it('never resurfaces a rejected candidate on a later scan', async () => {
     const market = await createTestMarket('DiscoReject');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
 
     const rejected = () => candidate({
       addressLine1: addr(103),
@@ -239,15 +236,15 @@ describe('repeated scans do not create duplicates', () => {
     });
 
     await stageCandidates({
-      candidates: [rejected()], scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      candidates: [rejected()], scanId: null, marketId: market.id, origin: 'scan',
     });
-    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.corridorId, corridor.id));
+    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.marketId, market.id));
 
     await reviewResult(staged!.id, 'rejected', 'Not a fit.', actor);
 
     // A later scan finds it again; it must be suppressed, not re-staged.
     const later = await stageCandidates({
-      candidates: [rejected()], scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      candidates: [rejected()], scanId: null, marketId: market.id, origin: 'scan',
     });
     expect(later.created).toBe(0);
     expect(later.suppressed).toBe(1);
@@ -255,64 +252,20 @@ describe('repeated scans do not create duplicates', () => {
 
   it('keeps "needs more research" in play rather than suppressing it', async () => {
     const market = await createTestMarket('DiscoNeedsResearch');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
 
     await stageCandidates({
       candidates: [candidate({
         addressLine1: addr(104),
         sources: [{ url: src('needs-research'), title: null, sourceName: null }],
       })],
-      scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      scanId: null, marketId: market.id, origin: 'scan',
     });
-    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.corridorId, corridor.id));
+    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.marketId, market.id));
     await reviewResult(staged!.id, 'needs_research', 'Check the county records.', actor);
 
     const suppressed = await db.select().from(discoverySuppressions)
       .where(eq(discoverySuppressions.keyValue, staged!.normalizedUrl!));
     expect(suppressed).toHaveLength(0);
-  });
-});
-
-/* ========================================================================== */
-/* Geographic relevance                                                       */
-/* ========================================================================== */
-
-describe('geographic relevance', () => {
-  it('flags candidates with no coordinates as unknown rather than guessing', async () => {
-    const market = await createTestMarket('DiscoGeoUnknown');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
-
-    await stageCandidates({
-      candidates: [candidate({
-        latitude: null, longitude: null,
-        addressLine1: addr(900),
-        sources: [{ url: src('no-coords'), title: null, sourceName: null }],
-      })],
-      scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
-    });
-
-    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.corridorId, corridor.id));
-    expect(staged!.geoRelevance).toBe('unknown');
-    // Unknown still lands in the review queue - it is never silently dropped.
-    expect(staged!.status).toBe('new');
-  });
-
-  it('marks a far-away candidate for research instead of importing it as inside', async () => {
-    const market = await createTestMarket('DiscoGeoOutside');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
-
-    await stageCandidates({
-      candidates: [candidate({
-        latitude: ANCHOR.lat + 0.5, longitude: ANCHOR.lng,
-        addressLine1: addr(800),
-        sources: [{ url: src('far'), title: null, sourceName: null }],
-      })],
-      scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
-    });
-
-    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.corridorId, corridor.id));
-    expect(staged!.geoRelevance).toBe('outside');
-    expect(staged!.status).toBe('needs_research');
   });
 });
 
@@ -323,7 +276,6 @@ describe('geographic relevance', () => {
 describe('AI never overwrites human-verified data', () => {
   it('proposes changes instead of applying them, and leaves verified fields alone', async () => {
     const market = await createTestMarket('DiscoNoOverwrite');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
 
     // A human-entered property. createProperty marks it human-verified.
     const property = await createProperty({
@@ -349,7 +301,7 @@ describe('AI never overwrites human-verified data', () => {
         propertyType: 'Office',
         sources: [{ url: src('overwrite-test'), title: null, sourceName: null }],
       })],
-      scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      scanId: null, marketId: market.id, origin: 'scan',
     });
 
     // The property record is completely untouched.
@@ -367,7 +319,7 @@ describe('AI never overwrites human-verified data', () => {
 
     // The candidate is staged as a suggestion against the existing property.
     const [staged] = await db.select().from(discoveryResults)
-      .where(eq(discoveryResults.corridorId, corridor.id));
+      .where(eq(discoveryResults.marketId, market.id));
     expect(staged!.suggestedPropertyId).toBe(property.id);
 
     const proposed = staged!.proposedChanges ?? {};
@@ -380,7 +332,6 @@ describe('AI never overwrites human-verified data', () => {
 
   it('does propose filling a field that is genuinely empty', async () => {
     const market = await createTestMarket('DiscoFillEmpty');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
 
     const property = await createProperty({
       marketId: market.id,
@@ -395,10 +346,10 @@ describe('AI never overwrites human-verified data', () => {
         propertyType: 'Retail - Freestanding',
         sources: [{ url: src('fill-empty'), title: null, sourceName: null }],
       })],
-      scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      scanId: null, marketId: market.id, origin: 'scan',
     });
 
-    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.corridorId, corridor.id));
+    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.marketId, market.id));
     expect(staged!.proposedChanges?.propertyType?.to).toBe('Retail - Freestanding');
     void property;
   });
@@ -411,7 +362,6 @@ describe('AI never overwrites human-verified data', () => {
 describe('approving a candidate', () => {
   it('creates a property carrying provenance, and suppresses the candidate', async () => {
     const market = await createTestMarket('DiscoApprove');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
 
     await stageCandidates({
       candidates: [candidate({
@@ -419,10 +369,10 @@ describe('approving a candidate', () => {
         sources: [{ url: src('approve-me'), title: 'Listing', sourceName: 'Example' }],
         needsVerification: ['ownerName'],
       })],
-      scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      scanId: null, marketId: market.id, origin: 'scan',
     });
 
-    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.corridorId, corridor.id));
+    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.marketId, market.id));
     const property = await approveAsNewProperty(staged!.id, {}, actor);
 
     expect(property.addressLine1).toBe(addr(700));
@@ -441,7 +391,7 @@ describe('approving a candidate', () => {
         addressLine1: addr(700),
         sources: [{ url: src('approve-me'), title: null, sourceName: null }],
       })],
-      scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      scanId: null, marketId: market.id, origin: 'scan',
     });
     expect(again.suppressed).toBe(1);
     expect(again.created).toBe(0);
@@ -449,17 +399,16 @@ describe('approving a candidate', () => {
 
   it('refuses to approve the same result twice', async () => {
     const market = await createTestMarket('DiscoDoubleApprove');
-    const corridor = await createRadiusCorridor(market.id, ANCHOR, 1609);
 
     await stageCandidates({
       candidates: [candidate({
         addressLine1: addr(600),
         sources: [{ url: src('twice'), title: null, sourceName: null }],
       })],
-      scanId: null, corridorId: corridor.id, marketId: market.id, origin: 'scan',
+      scanId: null, marketId: market.id, origin: 'scan',
     });
 
-    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.corridorId, corridor.id));
+    const [staged] = await db.select().from(discoveryResults).where(eq(discoveryResults.marketId, market.id));
     await approveAsNewProperty(staged!.id, {}, actor);
     await expect(approveAsNewProperty(staged!.id, {}, actor)).rejects.toThrow(/already been reviewed/i);
   });

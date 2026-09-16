@@ -192,7 +192,7 @@ describe('leaflet conversion', () => {
     // levels deep (rings, then points) - not three - so that getLatLngs()
     // round-trips through leafletLatLngsToGeometry without corruption; see
     // the long comment on geometryToLeafletLatLngs for why a third level here
-    // silently breaks every parcel/corridor edit.
+    // silently breaks every parcel edit.
     expect(leaflet[0]![0]).toEqual([33.0, -82.0]);
     expect(leaflet[0]).toHaveLength(4);
 
