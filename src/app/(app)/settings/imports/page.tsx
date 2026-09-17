@@ -44,6 +44,14 @@ export default async function ImportsPage() {
                 href="/api/export/malls" label="Malls"
                 body="Mall anchors with coordinates and placement flags."
               />
+              <ExportLink
+                href="/api/export/opportunities" label="Pipeline"
+                body="Every opportunity with its stage, prices and dates."
+              />
+              <ExportLink
+                href="/api/export/activities" label="Activity log"
+                body="Logged calls, notes and status changes with their authors."
+              />
             </div>
             <div className="border-t border-ink-100 px-4 py-3">
               <p className="text-[11px] leading-relaxed text-ink-500">

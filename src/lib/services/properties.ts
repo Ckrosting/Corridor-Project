@@ -34,7 +34,8 @@ export interface PropertyFilters {
   sort?: 'updated' | 'name' | 'followup' | 'price';
 }
 
-function buildWhere(f: PropertyFilters): SQL[] {
+/** Shared by the list, the count and the CSV export, so all three agree. */
+export function buildPropertyWhere(f: PropertyFilters): SQL[] {
   const conds: SQL[] = [];
 
   if (!f.includeArchived) conds.push(isNull(properties.archivedAt));
@@ -97,7 +98,7 @@ const SORTS = {
 
 /** Summary rows for the map and the property table. */
 export async function listProperties(f: PropertyFilters) {
-  const conds = buildWhere(f);
+  const conds = buildPropertyWhere(f);
   const limit = Math.min(f.limit ?? 500, 2000);
 
   const rows = await db
@@ -150,7 +151,7 @@ export async function listProperties(f: PropertyFilters) {
 }
 
 export async function countProperties(f: PropertyFilters): Promise<number> {
-  const conds = buildWhere(f);
+  const conds = buildPropertyWhere(f);
   const [row] = await db
     .select({ n: raw<number>`count(*)::int` })
     .from(properties)
@@ -434,8 +435,12 @@ export async function updateProperty(
   const coordsTouched = 'latitude' in patch || 'longitude' in patch;
   const values: Record<string, unknown> = { ...patch, updatedBy: actor.id };
   if (coordsTouched) {
-    values.needsMapPlacement =
-      (patch.latitude ?? before.latitude) == null || (patch.longitude ?? before.longitude) == null;
+    // `??` would treat an explicit null (clearing a coordinate) the same as "not
+    // provided" and fall back to the old value, so a cleared coordinate would
+    // never actually flip needsMapPlacement back on.
+    const lat = 'latitude' in patch ? patch.latitude : before.latitude;
+    const lng = 'longitude' in patch ? patch.longitude : before.longitude;
+    values.needsMapPlacement = lat == null || lng == null;
     values.locationSource = patch.locationSource ?? 'manual';
   }
   // Any human edit marks the record verified, which protects it from silent

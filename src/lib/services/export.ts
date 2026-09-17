@@ -1,8 +1,12 @@
 import '@/lib/server-guard';
-import { asc, eq, isNull, sql as raw } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, ne, sql as raw } from 'drizzle-orm';
 import { db } from '@/db';
-import { contacts, markets, outreachStatuses, ownerEntities, properties } from '@/db/schema';
+import {
+  activities, contacts, markets, opportunities, opportunityProperties, outreachStatuses,
+  ownerEntities, properties, transactionStages,
+} from '@/db/schema';
 import { toCsv } from '@/lib/csv';
+import { buildPropertyWhere, type PropertyFilters } from './properties';
 
 /**
  * CSV export.
@@ -13,9 +17,13 @@ import { toCsv } from '@/lib/csv';
  * and one you can only look at.
  */
 
-export async function exportPropertiesCsv(opts: { includeSample?: boolean } = {}) {
-  const conds = [isNull(properties.archivedAt)];
-  if (!opts.includeSample) conds.push(eq(properties.isSample, false));
+/**
+ * The export honours exactly the filters the property list is showing, through
+ * the same `buildPropertyWhere` the list and count use. An export that quietly
+ * ignored the filters would hand back the whole portfolio under a filtered name.
+ */
+export async function exportPropertiesCsv(filters: PropertyFilters = {}) {
+  const conds = buildPropertyWhere(filters);
 
   const rows = await db
     .select({
@@ -55,7 +63,7 @@ export async function exportPropertiesCsv(opts: { includeSample?: boolean } = {}
     .leftJoin(markets, eq(markets.id, properties.marketId))
     .leftJoin(ownerEntities, eq(ownerEntities.id, properties.ownerEntityId))
     .leftJoin(outreachStatuses, eq(outreachStatuses.id, properties.outreachStatusId))
-    .where(conds.length === 1 ? conds[0] : raw`${conds[0]} and ${conds[1]}`)
+    .where(conds.length ? and(...conds) : undefined)
     .orderBy(asc(markets.name), asc(properties.name));
 
   const headers = [
@@ -139,6 +147,135 @@ export async function exportMallsCsv() {
   return toCsv(headers, rows.map((r) => [
     r.id, r.mallName, r.marketName, r.address, r.city, r.state, r.zip,
     r.latitude, r.longitude, r.needsPlacement,
+  ]));
+}
+
+/**
+ * One row per opportunity, with the property it was promoted from.
+ *
+ * Removed and closed deals are included: a pipeline export that only showed the
+ * live board could not answer "what did we pass on last year, and why".
+ */
+export async function exportOpportunitiesCsv(opts: { includeSample?: boolean } = {}) {
+  const conds = [isNull(opportunities.archivedAt)];
+  if (!opts.includeSample) conds.push(eq(opportunities.isSample, false));
+
+  const primary = raw`(select op.property_id from opportunity_properties op
+    where op.opportunity_id = opportunities.id
+    order by op.is_primary desc, op.created_at asc limit 1)`;
+
+  const rows = await db
+    .select({
+      id: opportunities.id,
+      name: opportunities.name,
+      propertyName: properties.name,
+      propertyAddress: properties.addressLine1,
+      propertyCity: properties.city,
+      propertyState: properties.state,
+      marketName: markets.name,
+      stage: transactionStages.label,
+      stageCategory: transactionStages.category,
+      state: opportunities.state,
+      targetPrice: opportunities.targetPrice,
+      offerPrice: opportunities.offerPrice,
+      contractPrice: opportunities.contractPrice,
+      promotionReason: opportunities.promotionReason,
+      promotedAt: opportunities.promotedAt,
+      promotedBy: opportunities.promotedByLabel,
+      expectedCloseDate: opportunities.expectedCloseDate,
+      nextStep: opportunities.nextStep,
+      nextStepDate: opportunities.nextStepDate,
+      closedAt: opportunities.closedAt,
+      removedAt: opportunities.removedAt,
+      removedReason: opportunities.removedReason,
+      lostReason: opportunities.lostReason,
+      lostReasonNote: opportunities.lostReasonNote,
+      notes: opportunities.notes,
+      propertyCount: raw<number>`(select count(*)::int from opportunity_properties op
+        where op.opportunity_id = opportunities.id)`,
+      createdAt: opportunities.createdAt,
+      updatedAt: opportunities.updatedAt,
+    })
+    .from(opportunities)
+    .leftJoin(transactionStages, eq(transactionStages.id, opportunities.stageId))
+    .leftJoin(markets, eq(markets.id, opportunities.marketId))
+    .leftJoin(properties, raw`properties.id = ${primary}`)
+    .where(and(...conds))
+    .orderBy(asc(markets.name), asc(transactionStages.sortOrder), asc(opportunities.name));
+
+  const headers = [
+    'opportunity_id', 'opportunity_name', 'property_name', 'property_address',
+    'property_city', 'property_state', 'market', 'stage', 'stage_category', 'state',
+    'target_price', 'offer_price', 'contract_price', 'promotion_reason', 'promoted_at',
+    'promoted_by', 'expected_close_date', 'next_step', 'next_step_date', 'closed_at',
+    'removed_at', 'removed_reason', 'lost_reason', 'lost_reason_note',
+    'notes', 'property_count', 'created_at', 'updated_at',
+  ];
+
+  return toCsv(headers, rows.map((r) => [
+    r.id, r.name, r.propertyName, r.propertyAddress,
+    r.propertyCity, r.propertyState, r.marketName, r.stage, r.stageCategory, r.state,
+    r.targetPrice, r.offerPrice, r.contractPrice, r.promotionReason, r.promotedAt,
+    r.promotedBy, r.expectedCloseDate, r.nextStep, r.nextStepDate, r.closedAt,
+    r.removedAt, r.removedReason, r.lostReason, r.lostReasonNote,
+    r.notes, r.propertyCount, r.createdAt, r.updatedAt,
+  ]));
+}
+
+/**
+ * One row per logged activity.
+ *
+ * `type = 'system'` rows are internal bookkeeping ("Promoted to opportunity" and
+ * the like) written by the app, not by a person, so they are left out. Outreach
+ * `status_change` rows stay: they are the real record of how a conversation
+ * moved, and a user reading the export would miss the story without them.
+ */
+export async function exportActivitiesCsv(opts: { includeSample?: boolean } = {}) {
+  const conds = [ne(activities.type, 'system'), isNull(properties.archivedAt)];
+  if (!opts.includeSample) conds.push(eq(properties.isSample, false));
+
+  const rows = await db
+    .select({
+      id: activities.id,
+      propertyId: activities.propertyId,
+      propertyName: properties.name,
+      propertyAddress: properties.addressLine1,
+      propertyCity: properties.city,
+      propertyState: properties.state,
+      marketName: markets.name,
+      type: activities.type,
+      occurredAt: activities.occurredAt,
+      outcome: activities.outcome,
+      contactName: raw<string | null>`coalesce(contacts.name, activities.contact_name_free_text)`,
+      subject: activities.subject,
+      notes: activities.notes,
+      sellerMotivation: activities.sellerMotivation,
+      pricingExpectation: activities.pricingExpectation,
+      timingNotes: activities.timingNotes,
+      priceMentioned: activities.priceMentioned,
+      followUpDate: activities.followUpDate,
+      author: activities.authorLabel,
+      createdAt: activities.createdAt,
+    })
+    .from(activities)
+    .innerJoin(properties, eq(properties.id, activities.propertyId))
+    .leftJoin(markets, eq(markets.id, properties.marketId))
+    .leftJoin(contacts, eq(contacts.id, activities.contactId))
+    .where(and(...conds))
+    .orderBy(desc(activities.occurredAt));
+
+  const headers = [
+    'activity_id', 'property_id', 'property_name', 'property_address', 'property_city',
+    'property_state', 'market', 'type', 'occurred_at', 'outcome', 'contact_name',
+    'subject', 'notes', 'seller_motivation', 'pricing_expectation', 'timing_notes',
+    'price_mentioned', 'follow_up_date', 'author', 'created_at',
+  ];
+
+  return toCsv(headers, rows.map((r) => [
+    r.id, r.propertyId, r.propertyName, r.propertyAddress, r.propertyCity,
+    r.propertyState, r.marketName, r.type, r.occurredAt, r.outcome, r.contactName,
+    r.subject, r.notes, r.sellerMotivation, r.pricingExpectation, r.timingNotes,
+    r.priceMentioned, r.followUpDate, r.author, r.createdAt,
   ]));
 }
 
