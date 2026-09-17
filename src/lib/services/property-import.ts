@@ -9,7 +9,7 @@ import { normaliseHeader, parseCsv, unescapeCell } from '@/lib/csv';
 import { NotFoundError, ValidationError } from '@/lib/errors';
 import { lookupCountyParcelByAddress, lookupCountyParcelByPin } from '@/lib/geo/county-parcels';
 import { recordAudit } from './audit';
-import { attachCountyParcelMatch, createProperty } from './properties';
+import { attachCountyParcelMatch, createProperty, setCustomFieldValues } from './properties';
 
 /**
  * Bulk property import: parse -> map columns -> validate/preview -> explicit
@@ -86,13 +86,16 @@ export function parsePropertyImportFile(text: string): ParsedPropertyImport {
 export interface ValidatedPropertyRow {
   rowNumber: number;
   raw: Record<string, string>;
-  mapped: Partial<PropertyImportRow>;
+  mapped: Partial<PropertyImportRow> & { customFields?: Record<string, string> };
   errors: string[];
   warnings: string[];
   verdict: 'new' | 'duplicate' | 'error';
   duplicateOfId: string | null;
   action: 'create' | 'skip';
 }
+
+/** A mapping target naming a custom field def, rather than one of the built-in `PropertyImportRow` columns. */
+const CUSTOM_FIELD_PREFIX = 'customField:';
 
 const dupeKey = (address: string | null, name: string | null) =>
   `${(address ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')}|${(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
@@ -159,6 +162,14 @@ export async function validatePropertyRows(
       contactEmail: value('contactEmail') || null,
       parcelId: value('parcelId') || null,
     };
+
+    const customFields: Record<string, string> = {};
+    for (const [header, field] of Object.entries(mapping)) {
+      if (!field.startsWith(CUSTOM_FIELD_PREFIX)) continue;
+      const raw = rawRecord[header];
+      if (raw) customFields[field.slice(CUSTOM_FIELD_PREFIX.length)] = raw;
+    }
+    if (Object.keys(customFields).length > 0) (mapped as ValidatedPropertyRow['mapped']).customFields = customFields;
 
     let verdict: ValidatedPropertyRow['verdict'] = 'new';
     let duplicateOfId: string | null = null;
@@ -256,7 +267,7 @@ export async function commitPropertyImport(
 
   for (const row of rows) {
     const action = actions[row.rowNumber] ?? row.action;
-    const mapped = row.mapped as Partial<PropertyImportRow> | null;
+    const mapped = row.mapped as ValidatedPropertyRow['mapped'] | null;
 
     if (action !== 'create' || !mapped || (row.errors?.length ?? 0) > 0) {
       skipped++;
@@ -279,6 +290,16 @@ export async function commitPropertyImport(
       listingStatus: 'unknown',
       researchNotes: noteLines.join(' '),
     }, actor);
+
+    if (mapped.customFields && Object.keys(mapped.customFields).length > 0) {
+      try {
+        await setCustomFieldValues(property.id, mapped.customFields, actor);
+      } catch {
+        // A custom field's declared type (e.g. number, date) may reject a
+        // stray value in one row's cell - that must not fail the whole
+        // property creation, since the built-in fields are already valid.
+      }
+    }
 
     if (mapped.ownerName) {
       const { name: contactName, phones } = mapped.contactRaw ? splitContact(mapped.contactRaw) : { name: null, phones: [] };

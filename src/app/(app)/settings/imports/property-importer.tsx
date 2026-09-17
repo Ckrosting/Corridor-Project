@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, TriangleAlert, Upload, X } from 'lucide-react';
 import { Spinner } from '@/components/ui/primitives';
@@ -37,6 +37,14 @@ const FIELD_LABELS: Record<string, string> = {
   parcelId: 'Parcel ID (PIN)',
 };
 
+const CUSTOM_FIELD_PREFIX = 'customField:';
+const CUSTOM_FIELD_TYPES: Array<{ value: 'text' | 'number' | 'date' | 'checkbox'; label: string }> = [
+  { value: 'text', label: 'Text' },
+  { value: 'number', label: 'Number' },
+  { value: 'date', label: 'Date' },
+  { value: 'checkbox', label: 'Checkbox' },
+];
+
 /**
  * Upload → choose market → map → preview → confirm.
  *
@@ -45,32 +53,81 @@ const FIELD_LABELS: Record<string, string> = {
  * through the discovery review inbox. Nothing is written until Commit, and
  * duplicates default to skip so a re-upload cannot double the data.
  */
-export function PropertyImporter({ markets }: { markets: Array<{ id: string; name: string }> }) {
+export function PropertyImporter({
+  markets, customFields: initialCustomFields,
+}: {
+  markets: Array<{ id: string; name: string }>;
+  customFields: Array<{ key: string; label: string; type: string }>;
+}) {
   const router = useRouter();
   const [marketId, setMarketId] = useState(markets[0]?.id ?? '');
+  const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [actions, setActions] = useState<Record<number, 'create' | 'skip'>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ created: number; skipped: number; parcelsMatched?: number } | null>(null);
+  const [customFields, setCustomFields] = useState(initialCustomFields);
+  const [extraMapping, setExtraMapping] = useState<Record<string, string>>({});
+  const [creatingFieldFor, setCreatingFieldFor] = useState<string | null>(null);
+  const [newFieldForm, setNewFieldForm] = useState({ label: '', type: 'text' as 'text' | 'number' | 'date' | 'checkbox' });
 
-  async function upload(file: File) {
+  const usedFields = useMemo(() => new Set(Object.values(preview?.mapping ?? {})), [preview]);
+  const unmappedHeaders = useMemo(
+    () => (preview ? preview.headers.filter((h) => !(h in preview.mapping)) : []),
+    [preview],
+  );
+
+  async function upload(f: File, mapping?: Record<string, string>) {
     setBusy(true);
     setError(null);
     setResult(null);
     try {
       const form = new FormData();
-      form.append('file', file);
+      form.append('file', f);
       form.append('marketId', marketId);
+      if (mapping) form.append('mapping', JSON.stringify(mapping));
 
       const res = await fetch('/api/property-imports', { method: 'POST', body: form });
       const body = (await res.json().catch(() => ({}))) as Preview & { error?: string };
       if (!res.ok) throw new Error(body.error ?? 'That file could not be read.');
 
+      setFile(f);
       setPreview(body);
       setActions(Object.fromEntries(body.rows.map((r) => [r.rowNumber, r.action])));
+      setExtraMapping({});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That file could not be read.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyMapping() {
+    if (!file || !preview) return;
+    const merged = { ...preview.mapping, ...extraMapping };
+    await upload(file, merged);
+  }
+
+  async function createFieldAndMap(header: string) {
+    if (!newFieldForm.label.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/taxonomy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'custom_field', data: { label: newFieldForm.label.trim(), type: newFieldForm.type } }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; field?: { key: string; label: string; type: string } };
+      if (!res.ok || !body.field) throw new Error(body.error ?? 'Could not create that field.');
+
+      setCustomFields((prev) => [...prev, body.field!]);
+      setExtraMapping((m) => ({ ...m, [header]: `${CUSTOM_FIELD_PREFIX}${body.field!.key}` }));
+      setCreatingFieldFor(null);
+      setNewFieldForm({ label: '', type: 'text' });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create that field.');
     } finally {
       setBusy(false);
     }
@@ -180,12 +237,94 @@ export function PropertyImporter({ markets }: { markets: Array<{ id: string; nam
               </span>
             );
           })}
+          {Object.entries(preview.mapping)
+            .filter(([, f]) => f.startsWith(CUSTOM_FIELD_PREFIX))
+            .map(([header, f]) => {
+              const key = f.slice(CUSTOM_FIELD_PREFIX.length);
+              const label = customFields.find((c) => c.key === key)?.label ?? key;
+              return (
+                <span key={header} className="chip border-green-200 bg-green-50 text-green-800">
+                  {label} ← {header}
+                </span>
+              );
+            })}
         </div>
-        <p className="field-hint">
-          Unmapped optional columns are simply not imported. To change a mapping, rename the column
-          in your spreadsheet and upload again.
-        </p>
       </div>
+
+      {unmappedHeaders.length > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+          <h3 className="mb-1 flex items-center gap-1.5 text-xs font-medium text-amber-900">
+            <TriangleAlert size={13} /> {unmappedHeaders.length} column{unmappedHeaders.length === 1 ? '' : 's'} not recognized
+          </h3>
+          <p className="mb-2 text-[11px] text-amber-800">
+            These columns will not be imported unless you map each one to a field, so nothing typed
+            into your spreadsheet is lost.
+          </p>
+          <div className="space-y-1.5">
+            {unmappedHeaders.map((header) => (
+              <div key={header} className="flex flex-wrap items-center gap-2 rounded-md bg-white p-1.5">
+                <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink-800">{header}</span>
+                {creatingFieldFor === header ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <input
+                      className="input w-40 py-1 text-xs" placeholder="Field name" autoFocus
+                      value={newFieldForm.label}
+                      onChange={(e) => setNewFieldForm((f) => ({ ...f, label: e.target.value }))}
+                    />
+                    <select
+                      className="input w-24 py-1 text-xs"
+                      value={newFieldForm.type}
+                      onChange={(e) => setNewFieldForm((f) => ({ ...f, type: e.target.value as typeof f.type }))}
+                    >
+                      {CUSTOM_FIELD_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                    <button
+                      type="button" className="btn-primary btn-sm" disabled={busy || !newFieldForm.label.trim()}
+                      onClick={() => void createFieldAndMap(header)}
+                    >
+                      Create
+                    </button>
+                    <button type="button" className="btn-ghost btn-sm" onClick={() => setCreatingFieldFor(null)}>Cancel</button>
+                  </div>
+                ) : (
+                  <select
+                    className="input w-52 py-1 text-xs"
+                    value={extraMapping[header] ?? ''}
+                    onChange={(e) => {
+                      if (e.target.value === '__new__') { setCreatingFieldFor(header); return; }
+                      setExtraMapping((m) => {
+                        const next = { ...m };
+                        if (e.target.value) next[header] = e.target.value; else delete next[header];
+                        return next;
+                      });
+                    }}
+                  >
+                    <option value="">Ignore this column</option>
+                    <optgroup label="Property fields">
+                      {Object.entries(FIELD_LABELS)
+                        .filter(([field]) => !usedFields.has(field) || extraMapping[header] === field)
+                        .map(([field, label]) => <option key={field} value={field}>{label}</option>)}
+                    </optgroup>
+                    {customFields.length > 0 && (
+                      <optgroup label="Custom fields">
+                        {customFields.map((c) => (
+                          <option key={c.key} value={`${CUSTOM_FIELD_PREFIX}${c.key}`}>{c.label}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <option value="__new__">+ New custom field…</option>
+                  </select>
+                )}
+              </div>
+            ))}
+          </div>
+          {Object.keys(extraMapping).length > 0 && (
+            <button type="button" className="btn-primary btn-sm mt-2" disabled={busy} onClick={() => void applyMapping()}>
+              {busy && <Spinner />} Apply mapping
+            </button>
+          )}
+        </div>
+      )}
 
       {preview.summary.errors > 0 && (
         <div className="banner-warn">

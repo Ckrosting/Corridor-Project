@@ -504,7 +504,7 @@ export async function updateProperty(
   return updated;
 }
 
-async function setCustomFieldValues(propertyId: string, values: Record<string, unknown>, actor: Actor) {
+export async function setCustomFieldValues(propertyId: string, values: Record<string, unknown>, actor: Actor) {
   const defs = await db.select().from(customFieldDefs)
     .where(and(eq(customFieldDefs.entity, 'property'), isNull(customFieldDefs.archivedAt)));
 

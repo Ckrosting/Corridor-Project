@@ -1,15 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq, like } from 'drizzle-orm';
 import { db } from '@/db';
-import { mallAnchors, markets } from '@/db/schema';
+import { customFieldValues, mallAnchors, markets, properties } from '@/db/schema';
 import { csvCell, normaliseHeader, parseCsv, toCsv } from '@/lib/csv';
 import {
   commitMallImport, createImportBatch, parseImportFile, suggestMallMapping, validateMallRows,
 } from '@/lib/services/import';
+import {
+  commitPropertyImport, createPropertyImportBatch, parsePropertyImportFile, validatePropertyRows,
+} from '@/lib/services/property-import';
+import { createCustomField } from '@/lib/services/taxonomy';
 import { parseCandidateCsv, parseCandidateXlsx } from '@/lib/services/candidate-csv';
 import { readXlsxRows } from '@/lib/xlsx';
 import type { Actor } from '@/lib/auth/guards';
-import { cleanupTestData, ensureBaseline, testActor, TEST_PREFIX } from './helpers';
+import { cleanupTestData, createTestMarket, ensureBaseline, testActor, TEST_PREFIX } from './helpers';
 
 let actor: Actor;
 
@@ -495,5 +499,82 @@ describe('mall import commit', () => {
 
     expect(result.created).toBe(1);
     expect(result.skipped).toBe(1);
+  });
+
+  it('keeps a column the auto-mapper missed once the user maps it by hand', async () => {
+    const csv = [
+      `${HEADER},Special Instructions`,
+      `${TEST_PREFIX}IMP Mapped Mall,${TEST_PREFIX}IMP Mapped Market,60 Main St,Augusta,GA,30909,33.47,-82.08,Anchor tenant leaving in 2026`,
+    ].join('\r\n');
+
+    const parsed = parseImportFile(csv);
+    // The suggested mapping never touches "Special Instructions" - it isn't one of the recognised aliases.
+    expect(parsed.suggestedMapping['Special Instructions']).toBeUndefined();
+
+    const mapping = { ...parsed.suggestedMapping, 'Special Instructions': 'notes' };
+    const rows = await validateMallRows(parsed, mapping);
+    expect(rows[0]!.mapped.notes).toBe('Anchor tenant leaving in 2026');
+
+    const batch = await createImportBatch('mapped.csv', mapping, rows, actor);
+    await commitMallImport(batch.id, {}, actor);
+
+    const [market] = await db.select().from(markets)
+      .where(eq(markets.name, `${TEST_PREFIX}IMP Mapped Market`)).limit(1);
+    const [anchor] = await db.select().from(mallAnchors).where(eq(mallAnchors.marketId, market!.id));
+    expect(anchor!.notes).toBe('Anchor tenant leaving in 2026');
+  });
+});
+
+/* ========================================================================== */
+/* Property import: manual column mapping                                    */
+/* ========================================================================== */
+
+describe('property import manual column mapping', () => {
+  const PROPERTY_HEADER = 'Name,Address,City,State,ZIP';
+
+  it('imports a column the auto-mapper missed once mapped to a built-in field by hand', async () => {
+    const market = await createTestMarket('PropImport');
+    const csv = [
+      `${PROPERTY_HEADER},Category`,
+      `${TEST_PREFIX} Mapped Property,1 Main St,Augusta,GA,30909,Retail`,
+    ].join('\r\n');
+
+    const parsed = parsePropertyImportFile(csv);
+    expect(parsed.suggestedMapping.Category).toBeUndefined();
+
+    const mapping = { ...parsed.suggestedMapping, Category: 'propertyType' };
+    const rows = await validatePropertyRows(parsed, mapping, market.id);
+    expect(rows[0]!.mapped.propertyType).toBe('Retail');
+
+    const batch = await createPropertyImportBatch('mapped.csv', mapping, market.id, rows, actor);
+    await commitPropertyImport(batch.id, {}, actor);
+
+    const [row] = await db.select().from(properties)
+      .where(eq(properties.name, `${TEST_PREFIX} Mapped Property`)).limit(1);
+    expect(row!.propertyType).toBe('Retail');
+  });
+
+  it('stores a column mapped to a custom field as that field\'s value on the created property', async () => {
+    const market = await createTestMarket('PropImportCustom');
+    const field = await createCustomField({ label: `${TEST_PREFIX} Zoning Notes`, type: 'text' }, actor);
+
+    const csv = [
+      `${PROPERTY_HEADER},Zoning`,
+      `${TEST_PREFIX} Custom Field Property,2 Main St,Augusta,GA,30909,C-2 commercial`,
+    ].join('\r\n');
+
+    const parsed = parsePropertyImportFile(csv);
+    const mapping = { ...parsed.suggestedMapping, Zoning: `customField:${field.key}` };
+    const rows = await validatePropertyRows(parsed, mapping, market.id);
+    expect(rows[0]!.mapped.customFields).toEqual({ [field.key]: 'C-2 commercial' });
+
+    const batch = await createPropertyImportBatch('custom.csv', mapping, market.id, rows, actor);
+    await commitPropertyImport(batch.id, {}, actor);
+
+    const [row] = await db.select().from(properties)
+      .where(eq(properties.name, `${TEST_PREFIX} Custom Field Property`)).limit(1);
+    const [value] = await db.select().from(customFieldValues)
+      .where(eq(customFieldValues.propertyId, row!.id));
+    expect(value!.value).toBe('C-2 commercial');
   });
 });

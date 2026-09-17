@@ -22,6 +22,8 @@ export interface MallImportRow {
   city: string | null;
   state: string | null;
   zip: string | null;
+  county: string | null;
+  notes: string | null;
   latitude: number | null;
   longitude: number | null;
 }
@@ -34,6 +36,8 @@ export const MALL_COLUMN_ALIASES: Record<keyof MallImportRow, string[]> = {
   city: ['city', 'town'],
   state: ['state', 'st', 'state_code'],
   zip: ['zip', 'zip_code', 'postal_code', 'postcode'],
+  county: ['county'],
+  notes: ['notes', 'comment', 'comments', 'remarks'],
   latitude: ['latitude', 'lat', 'y'],
   longitude: ['longitude', 'lng', 'lon', 'long', 'x'],
 };
@@ -160,6 +164,8 @@ export async function validateMallRows(
       city: value('city') || null,
       state: stateValue || null,
       zip: value('zip') || null,
+      county: value('county') || null,
+      notes: value('notes') || null,
       latitude, longitude,
     };
 
@@ -298,6 +304,8 @@ export async function commitMallImport(
         city: mapped.city ?? null,
         state: mapped.state ?? null,
         postalCode: mapped.zip ?? null,
+        county: mapped.county ?? null,
+        notes: mapped.notes ?? null,
         latitude: mapped.latitude ?? null,
         longitude: mapped.longitude ?? null,
         // A mall without reliable coordinates is imported and FLAGGED, never

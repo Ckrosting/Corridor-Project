@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, TriangleAlert, Upload, X } from 'lucide-react';
 import { Spinner } from '@/components/ui/primitives';
@@ -29,6 +29,8 @@ const FIELD_LABELS: Record<string, string> = {
   city: 'City',
   state: 'State',
   zip: 'ZIP',
+  county: 'County',
+  notes: 'Notes',
   latitude: 'Latitude',
   longitude: 'Longitude',
 };
@@ -42,32 +44,47 @@ const FIELD_LABELS: Record<string, string> = {
  */
 export function MallImporter() {
   const router = useRouter();
+  const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [actions, setActions] = useState<Record<number, 'create' | 'update' | 'skip'>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ created: number; updated: number; skipped: number } | null>(null);
+  const [extraMapping, setExtraMapping] = useState<Record<string, string>>({});
 
-  async function upload(file: File, mapping?: Record<string, string>) {
+  const usedFields = useMemo(() => new Set(Object.values(preview?.mapping ?? {})), [preview]);
+  const unmappedHeaders = useMemo(
+    () => (preview ? preview.headers.filter((h) => !(h in preview.mapping)) : []),
+    [preview],
+  );
+
+  async function upload(f: File, mapping?: Record<string, string>) {
     setBusy(true);
     setError(null);
     setResult(null);
     try {
       const form = new FormData();
-      form.append('file', file);
+      form.append('file', f);
       if (mapping) form.append('mapping', JSON.stringify(mapping));
 
       const res = await fetch('/api/imports', { method: 'POST', body: form });
       const body = (await res.json().catch(() => ({}))) as Preview & { error?: string };
       if (!res.ok) throw new Error(body.error ?? 'That file could not be read.');
 
+      setFile(f);
       setPreview(body);
       setActions(Object.fromEntries(body.rows.map((r) => [r.rowNumber, r.action])));
+      setExtraMapping({});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That file could not be read.');
     } finally {
       setBusy(false);
     }
+  }
+
+  async function applyMapping() {
+    if (!file || !preview) return;
+    await upload(file, { ...preview.mapping, ...extraMapping });
   }
 
   async function commit() {
@@ -167,11 +184,45 @@ export function MallImporter() {
             );
           })}
         </div>
-        <p className="field-hint">
-          Unmapped optional columns are simply not imported. To change a mapping, rename the column
-          in your spreadsheet and upload again.
-        </p>
       </div>
+
+      {unmappedHeaders.length > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+          <h3 className="mb-1 flex items-center gap-1.5 text-xs font-medium text-amber-900">
+            <TriangleAlert size={13} /> {unmappedHeaders.length} column{unmappedHeaders.length === 1 ? '' : 's'} not recognized
+          </h3>
+          <p className="mb-2 text-[11px] text-amber-800">
+            These columns will not be imported unless you map each one to a field, so nothing typed
+            into your spreadsheet is lost.
+          </p>
+          <div className="space-y-1.5">
+            {unmappedHeaders.map((header) => (
+              <div key={header} className="flex flex-wrap items-center gap-2 rounded-md bg-white p-1.5">
+                <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink-800">{header}</span>
+                <select
+                  className="input w-52 py-1 text-xs"
+                  value={extraMapping[header] ?? ''}
+                  onChange={(e) => setExtraMapping((m) => {
+                    const next = { ...m };
+                    if (e.target.value) next[header] = e.target.value; else delete next[header];
+                    return next;
+                  })}
+                >
+                  <option value="">Ignore this column</option>
+                  {Object.entries(FIELD_LABELS)
+                    .filter(([field]) => !usedFields.has(field) || extraMapping[header] === field)
+                    .map(([field, label]) => <option key={field} value={field}>{label}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          {Object.keys(extraMapping).length > 0 && (
+            <button type="button" className="btn-primary btn-sm mt-2" disabled={busy} onClick={() => void applyMapping()}>
+              {busy && <Spinner />} Apply mapping
+            </button>
+          )}
+        </div>
+      )}
 
       {preview.summary.errors > 0 && (
         <div className="banner-warn">

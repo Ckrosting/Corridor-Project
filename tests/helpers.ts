@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { eq, inArray, like } from 'drizzle-orm';
 import { db } from '@/db';
 import {
-  contacts, markets, opportunities, outreachStatuses, ownerEntities, properties,
+  contacts, customFieldDefs, markets, opportunities, outreachStatuses, ownerEntities, properties,
   tags, transactionStages, users,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
@@ -118,4 +118,9 @@ export async function cleanupTestData() {
   // Owner entities are not market-scoped either; properties reference them with
   // ON DELETE SET NULL, so they outlive the test properties that pointed at them.
   await db.delete(ownerEntities).where(like(ownerEntities.name, `${TEST_PREFIX}%`));
+
+  // Custom field defs are global vocabulary, same reasoning as tags above.
+  // custom_field_values cascades from either side, so this also clears any
+  // values left on properties that were already deleted above.
+  await db.delete(customFieldDefs).where(like(customFieldDefs.label, `${TEST_PREFIX}%`));
 }
