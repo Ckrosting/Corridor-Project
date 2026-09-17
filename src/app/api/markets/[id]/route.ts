@@ -4,7 +4,7 @@ import { markets } from '@/db/schema';
 import { requireAdmin, requireUser } from '@/lib/auth/guards';
 import { ok, readJson, route } from '@/lib/api';
 import { marketUpdateSchema } from '@/lib/validation/schemas';
-import { updateWithVersion, recordAudit } from '@/lib/services/audit';
+import { archiveMarket, updateMarket } from '@/lib/services/markets';
 import { NotFoundError } from '@/lib/errors';
 
 export const dynamic = 'force-dynamic';
@@ -24,12 +24,7 @@ export const PATCH = route(async (req: Request, ctx: Ctx) => {
   const actor = await requireUser();
   const { id } = await ctx.params;
   const input = marketUpdateSchema.parse(await readJson(req));
-  const { version, ...values } = input;
-  const market = await updateWithVersion<typeof markets.$inferSelect>({
-    table: markets, id, expectedVersion: version, values, entityLabel: 'market',
-  });
-  await recordAudit({ entityType: 'market', entityId: id, action: 'update', summary: `Updated market "${market.name}"`, actor });
-  return ok({ market });
+  return ok({ market: await updateMarket(id, input, actor) });
 });
 
 /**
@@ -41,12 +36,6 @@ export const PATCH = route(async (req: Request, ctx: Ctx) => {
 export const DELETE = route(async (_req: Request, ctx: Ctx) => {
   const actor = await requireAdmin();
   const { id } = await ctx.params;
-  const [market] = await db.update(markets)
-    .set({ archivedAt: new Date() }).where(eq(markets.id, id)).returning();
-  if (!market) throw new NotFoundError('Market');
-  await recordAudit({
-    entityType: 'market', entityId: id, action: 'archive',
-    summary: `Archived market "${market.name}"`, actor,
-  });
+  await archiveMarket(id, actor);
   return ok({ archived: true });
 });

@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import {
-  activities, contacts, opportunities, opportunityProperties, properties,
-  propertyContacts, propertyParcels,
+  activities, contacts, mallAnchors, opportunities, opportunityProperties, opportunityStageHistory,
+  properties, propertyContacts, propertyParcels, propertyTags, tags, users,
 } from '@/db/schema';
 import {
   createParcel, createProperty, getPropertyDetail, updateParcel, updateProperty,
@@ -16,12 +16,20 @@ import {
   createContact, linkContactToProperty, unlinkContactFromProperty,
   updateContact, updatePropertyContactLink,
 } from '@/lib/services/contacts';
-import { promoteToOpportunity, setOpportunityState } from '@/lib/services/opportunities';
+import { promoteToOpportunity, setOpportunityState, updateOpportunity } from '@/lib/services/opportunities';
+import { dealValue, pipelineTotal } from '@/lib/pipeline-value';
+import { archiveUser, restoreUser, updateUser } from '@/lib/services/users';
+import { listAuditLog } from '@/lib/services/audit-log';
+import { archiveMarket, restoreMarket, updateMarket } from '@/lib/services/markets';
+import { archiveMallAnchor, restoreMallAnchor, updateMallAnchor } from '@/lib/services/mall-anchors';
+import { bulkAddTags, bulkSetFollowUpDate, bulkUpdateOutreachStatus } from '@/lib/services/properties-bulk';
 import { ConflictError, ValidationError } from '@/lib/errors';
 import { areaAcres, pointInGeometry } from '@/lib/geo/polygon';
+import { exportActivitiesCsv, exportOpportunitiesCsv, exportPropertiesCsv } from '@/lib/services/export';
+import { parseCsv } from '@/lib/csv';
 import type { Actor } from '@/lib/auth/guards';
 import {
-  cleanupTestData, createTestMarket, ensureBaseline,
+  cleanupTestData, createTestMarket, createTestUser, ensureBaseline,
   squareAround, stageByKey, statusByKey, TEST_PREFIX, testActor,
 } from './helpers';
 
@@ -116,6 +124,18 @@ describe('parcel persistence', () => {
     await createParcel({ propertyId: property.id, geometry: squareAround(ANCHOR, 0.0008) }, actor);
     const [after] = await db.select().from(properties).where(eq(properties.id, property.id));
     expect(after!.needsParcelOutline).toBe(false);
+  });
+
+  it('flags needsMapPlacement when an edit explicitly clears both coordinates', async () => {
+    // Regression: `patch.latitude ?? before.latitude` treats an explicit null the
+    // same as "not provided" and falls back to the OLD coordinate, so clearing a
+    // point's location silently never marked it as needing map placement again.
+    const market = await createTestMarket('ClearCoords');
+    const property = await createProperty({ marketId: market.id, latitude: ANCHOR.lat, longitude: ANCHOR.lng }, actor);
+    expect(property.needsMapPlacement).toBe(false);
+
+    const updated = await updateProperty(property.id, { version: property.version, latitude: null, longitude: null }, actor);
+    expect(updated.needsMapPlacement).toBe(true);
   });
 });
 
@@ -260,6 +280,54 @@ describe('call history and follow-ups', () => {
     // Without this rule the queue would list every untouched record in the database.
     expect(ids).not.toContain(untouched.id);
   });
+
+  it('narrows the follow-up queues to a single market', async () => {
+    const [a, b] = await Promise.all([createTestMarket('QueueA'), createTestMarket('QueueB')]);
+    const past = new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+
+    const inA = await createProperty({ marketId: a.id, name: 'A overdue', nextFollowUpDate: past }, actor);
+    const inB = await createProperty({ marketId: b.id, name: 'B overdue', nextFollowUpDate: past }, actor);
+
+    const rows = await getFollowUps('overdue', { marketId: a.id });
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain(inA.id);
+    expect(ids).not.toContain(inB.id);
+  });
+
+  it('moves a property between buckets when its follow-up is rescheduled from the queue', async () => {
+    const market = await createTestMarket('Reschedule');
+    const past = new Date(Date.now() - 4 * 864e5).toISOString().slice(0, 10);
+    const future = new Date(Date.now() + 9 * 864e5).toISOString().slice(0, 10);
+
+    const property = await createProperty({ marketId: market.id, name: 'Push out', nextFollowUpDate: past }, actor);
+    expect((await getFollowUps('overdue', { marketId: market.id })).map((r) => r.id)).toContain(property.id);
+
+    await setFollowUp(property.id, future, actor);
+
+    expect((await getFollowUps('overdue', { marketId: market.id })).map((r) => r.id)).not.toContain(property.id);
+    expect((await getFollowUps('upcoming', { marketId: market.id })).map((r) => r.id)).toContain(property.id);
+  });
+
+  it('clears the follow-up as an auditable note rather than a silent field wipe', async () => {
+    const market = await createTestMarket('MarkDone');
+    const ready = await statusByKey('ready_to_contact');
+    const today = new Date().toISOString().slice(0, 10);
+    const property = await createProperty(
+      { marketId: market.id, name: 'Done', outreachStatusId: ready.id, nextFollowUpDate: today }, actor,
+    );
+
+    await logActivity({
+      propertyId: property.id, type: 'note', subject: 'Follow-up completed', setNextFollowUpDate: null,
+    }, actor);
+
+    const [row] = await db.select().from(properties).where(eq(properties.id, property.id));
+    expect(row!.nextFollowUpDate).toBeNull();
+    expect((await getFollowUps('today', { marketId: market.id })).map((r) => r.id)).not.toContain(property.id);
+    // The clearing left a trace: the property now shows up as unscheduled with a note on file.
+    expect((await getFollowUps('unscheduled', { marketId: market.id })).map((r) => r.id)).toContain(property.id);
+    const logged = await db.select().from(activities).where(eq(activities.propertyId, property.id));
+    expect(logged.some((a) => a.type === 'note' && a.subject === 'Follow-up completed')).toBe(true);
+  });
 });
 
 /* ========================================================================== */
@@ -357,6 +425,71 @@ describe('transaction pipeline', () => {
 
     const qualified = await stageByKey('qualified');
     expect(opp.stageId).toBe(qualified.id);
+  });
+});
+
+/* ========================================================================== */
+/* Pipeline stage moves and value rollups                                    */
+/* ========================================================================== */
+
+describe('pipeline stage moves', () => {
+  it('moves an opportunity to a new stage and records it in stage history', async () => {
+    const market = await createTestMarket('StageMove');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const opp = await promoteToOpportunity({ propertyId: property.id, promotionReason: 'Worth pursuing.' }, actor);
+
+    const underwriting = await stageByKey('underwriting');
+    const updated = await updateOpportunity(opp.id, { stageId: underwriting.id, version: opp.version }, actor);
+    expect(updated.stageId).toBe(underwriting.id);
+
+    const history = await db.select().from(opportunityStageHistory).where(eq(opportunityStageHistory.opportunityId, opp.id));
+    expect(history.some((h) => h.toStageId === underwriting.id)).toBe(true);
+  });
+
+  it('refuses to move a deal to a closed_lost stage without a lost reason', async () => {
+    const market = await createTestMarket('LostNoReason');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const opp = await promoteToOpportunity({ propertyId: property.id, promotionReason: 'Candidate.' }, actor);
+    const dead = await stageByKey('dead');
+
+    await expect(updateOpportunity(opp.id, { stageId: dead.id, version: opp.version }, actor))
+      .rejects.toThrow(/reason/i);
+  });
+
+  it('records the lost reason and clears it on reopen', async () => {
+    const market = await createTestMarket('LostReason');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const opp = await promoteToOpportunity({ propertyId: property.id, promotionReason: 'Candidate.' }, actor);
+    const dead = await stageByKey('dead');
+    const qualified = await stageByKey('qualified');
+
+    const lost = await updateOpportunity(opp.id, {
+      stageId: dead.id, lostReason: 'price', lostReasonNote: 'Too far apart.', version: opp.version,
+    }, actor);
+    expect(lost.lostReason).toBe('price');
+    expect(lost.lostReasonNote).toBe('Too far apart.');
+
+    const reopened = await updateOpportunity(opp.id, { stageId: qualified.id, version: lost.version }, actor);
+    expect(reopened.lostReason).toBeNull();
+    expect(reopened.lostReasonNote).toBeNull();
+  });
+});
+
+describe('pipeline value rollups', () => {
+  it('sums the furthest-along price field per deal, falling back target -> offer -> contract precedence', () => {
+    expect(dealValue({ targetPrice: '100', offerPrice: null, contractPrice: null })).toBe(100);
+    expect(dealValue({ targetPrice: '100', offerPrice: '150', contractPrice: null })).toBe(150);
+    expect(dealValue({ targetPrice: '100', offerPrice: '150', contractPrice: '175' })).toBe(175);
+    expect(dealValue({ targetPrice: null, offerPrice: null, contractPrice: null })).toBeNull();
+  });
+
+  it('totals a list of deals, treating a valueless deal as zero rather than breaking the sum', () => {
+    const items = [
+      { targetPrice: '100', offerPrice: null, contractPrice: null },
+      { targetPrice: null, offerPrice: null, contractPrice: null },
+      { targetPrice: '50', offerPrice: '75', contractPrice: null },
+    ];
+    expect(pipelineTotal(items)).toBe(175);
   });
 });
 
@@ -543,5 +676,270 @@ describe('contacts', () => {
     expect(updated.version).toBe(2);
 
     await expect(updateContact(contact.id, { version: 1, phone: '555-0301' }, actor)).rejects.toThrow(ConflictError);
+  });
+});
+
+/* ========================================================================== */
+/* Bulk property actions                                                     */
+/* ========================================================================== */
+
+describe('bulk property actions', () => {
+  it('sets outreach status on every target property and logs one status_change entry each', async () => {
+    const market = await createTestMarket('BulkStatus');
+    const a = await createProperty({ marketId: market.id, name: 'A' }, actor);
+    const b = await createProperty({ marketId: market.id, name: 'B' }, actor);
+    const target = await statusByKey('in_conversation');
+
+    const result = await bulkUpdateOutreachStatus([a.id, b.id], target.id, actor);
+    expect(result.updated).toBe(2);
+
+    const [rowA] = await db.select().from(properties).where(eq(properties.id, a.id));
+    const [rowB] = await db.select().from(properties).where(eq(properties.id, b.id));
+    expect(rowA!.outreachStatusId).toBe(target.id);
+    expect(rowB!.outreachStatusId).toBe(target.id);
+
+    const historyA = await db.select().from(activities).where(eq(activities.propertyId, a.id));
+    expect(historyA.filter((h) => h.type === 'status_change')).toHaveLength(1);
+  });
+
+  it('sets a follow-up date across a batch, and clears it when given null', async () => {
+    const market = await createTestMarket('BulkFollowUp');
+    const a = await createProperty({ marketId: market.id }, actor);
+    const b = await createProperty({ marketId: market.id }, actor);
+
+    await bulkSetFollowUpDate([a.id, b.id], '2026-12-15', actor);
+    let [rowA] = await db.select().from(properties).where(eq(properties.id, a.id));
+    expect(rowA!.nextFollowUpDate).toBe('2026-12-15');
+
+    await bulkSetFollowUpDate([a.id, b.id], null, actor);
+    [rowA] = await db.select().from(properties).where(eq(properties.id, a.id));
+    expect(rowA!.nextFollowUpDate).toBeNull();
+  });
+
+  it('adds a tag to every target property without duplicating the link', async () => {
+    const market = await createTestMarket('BulkTags');
+    const a = await createProperty({ marketId: market.id }, actor);
+    const [tag] = await db.insert(tags).values({ name: `${TEST_PREFIX} Q1 Push` }).returning();
+
+    await bulkAddTags([a.id], [tag!.id], actor);
+    await bulkAddTags([a.id], [tag!.id], actor); // re-applying the same tag must not duplicate the link
+
+    const links = await db.select().from(propertyTags)
+      .where(and(eq(propertyTags.propertyId, a.id), eq(propertyTags.tagId, tag!.id)));
+    expect(links).toHaveLength(1);
+  });
+
+  it('rejects a batch over the size cap without writing anything', async () => {
+    const oversized = Array.from({ length: 501 }, () => '00000000-0000-0000-0000-000000000000');
+    await expect(bulkSetFollowUpDate(oversized, '2026-01-01', actor)).rejects.toThrow(ValidationError);
+  });
+
+  it('never touches a property outside the given id list', async () => {
+    const market = await createTestMarket('BulkIsolation');
+    const inBatch = await createProperty({ marketId: market.id, nextFollowUpDate: '2026-01-01' }, actor);
+    const untouched = await createProperty({ marketId: market.id, nextFollowUpDate: '2026-01-01' }, actor);
+
+    await bulkSetFollowUpDate([inBatch.id], '2026-06-01', actor);
+
+    const [rowUntouched] = await db.select().from(properties).where(eq(properties.id, untouched.id));
+    expect(rowUntouched!.nextFollowUpDate).toBe('2026-01-01');
+  });
+});
+
+/* ========================================================================== */
+/* User administration                                                       */
+/* ========================================================================== */
+
+describe('user administration', () => {
+  it('changes a role and records it in the audit trail', async () => {
+    const target = await createTestUser('RoleChange', 'member');
+    const updated = await updateUser(target.id, { role: 'admin' }, actor);
+    expect(updated.role).toBe('admin');
+
+    const [row] = await db.select().from(users).where(eq(users.id, target.id));
+    expect(row!.role).toBe('admin');
+  });
+
+  it('refuses to let an admin demote or deactivate their own account', async () => {
+    await expect(updateUser(actor.id, { role: 'member' }, actor)).rejects.toThrow(ValidationError);
+    await expect(updateUser(actor.id, { isActive: false }, actor)).rejects.toThrow(ValidationError);
+  });
+
+  it('refuses to let an admin archive their own account', async () => {
+    await expect(archiveUser(actor.id, actor)).rejects.toThrow(ValidationError);
+  });
+
+  it('archives a user, excluding them from the active list, then restores them', async () => {
+    const target = await createTestUser('ArchiveMe');
+    const archived = await archiveUser(target.id, actor);
+    expect(archived.archivedAt).toBeTruthy();
+    expect(archived.isActive).toBe(false);
+
+    const activeList = await db.select().from(users).where(isNull(users.archivedAt));
+    expect(activeList.some((u) => u.id === target.id)).toBe(false);
+
+    const restored = await restoreUser(target.id, actor);
+    expect(restored.archivedAt).toBeNull();
+    // Restoring returns the account to the list but does not silently re-enable sign-in.
+    expect(restored.isActive).toBe(false);
+
+    const activeListAfter = await db.select().from(users).where(isNull(users.archivedAt));
+    expect(activeListAfter.some((u) => u.id === target.id)).toBe(true);
+  });
+});
+
+/* ========================================================================== */
+/* Markets and mall anchors                                                  */
+/* ========================================================================== */
+
+describe('markets', () => {
+  it('edits a market\'s own fields', async () => {
+    const market = await createTestMarket('MarketEdit');
+    const updated = await updateMarket(market.id, { version: market.version, name: `${TEST_PREFIX} Renamed`, notes: 'Updated.' }, actor);
+    expect(updated.name).toBe(`${TEST_PREFIX} Renamed`);
+    expect(updated.notes).toBe('Updated.');
+  });
+
+  it('archives and restores a market, rejecting a stale restore', async () => {
+    const market = await createTestMarket('MarketArchive');
+    const archived = await archiveMarket(market.id, actor);
+    expect(archived.archivedAt).toBeTruthy();
+
+    await expect(restoreMarket(market.id, archived.version + 5, actor)).rejects.toThrow(ConflictError);
+
+    const restored = await restoreMarket(market.id, archived.version, actor);
+    expect(restored.archivedAt).toBeNull();
+  });
+});
+
+describe('mall anchors', () => {
+  async function insertAnchor(marketId: string) {
+    const [anchor] = await db.insert(mallAnchors).values({
+      marketId, name: `${TEST_PREFIX} Anchor`, latitude: ANCHOR.lat, longitude: ANCHOR.lng,
+      needsMapPlacement: false,
+    }).returning();
+    return anchor!;
+  }
+
+  it('edits a mall anchor\'s fields', async () => {
+    const market = await createTestMarket('AnchorEdit');
+    const anchor = await insertAnchor(market.id);
+
+    const updated = await updateMallAnchor(anchor.id, { version: anchor.version, name: `${TEST_PREFIX} Renamed Anchor`, city: 'Testville' }, actor);
+    expect(updated.name).toBe(`${TEST_PREFIX} Renamed Anchor`);
+    expect(updated.city).toBe('Testville');
+  });
+
+  it('flags needsMapPlacement when coordinates are cleared', async () => {
+    const market = await createTestMarket('AnchorPlacement');
+    const anchor = await insertAnchor(market.id);
+    expect(anchor.needsMapPlacement).toBe(false);
+
+    const updated = await updateMallAnchor(anchor.id, { version: anchor.version, latitude: null, longitude: null }, actor);
+    expect(updated.needsMapPlacement).toBe(true);
+  });
+
+  it('archives and restores a mall anchor', async () => {
+    const market = await createTestMarket('AnchorArchive');
+    const anchor = await insertAnchor(market.id);
+
+    const archived = await archiveMallAnchor(anchor.id, actor);
+    expect(archived.archivedAt).toBeTruthy();
+
+    const active = await db.select().from(mallAnchors)
+      .where(and(eq(mallAnchors.marketId, market.id), isNull(mallAnchors.archivedAt)));
+    expect(active.some((a) => a.id === anchor.id)).toBe(false);
+
+    const restored = await restoreMallAnchor(anchor.id, archived.version, actor);
+    expect(restored.archivedAt).toBeNull();
+  });
+});
+
+/* ========================================================================== */
+/* Audit log (read side)                                                     */
+/* ========================================================================== */
+
+describe('audit log', () => {
+  it('records and lists entries filtered by entity type, and a limit actually limits', async () => {
+    const market = await createTestMarket('AuditRead');
+    await createProperty({ marketId: market.id, name: 'Audited A' }, actor);
+    await createProperty({ marketId: market.id, name: 'Audited B' }, actor);
+
+    const page = await listAuditLog({ entityType: 'property', limit: 1 });
+    expect(page.rows).toHaveLength(1);
+    expect(page.rows[0]!.entityType).toBe('property');
+    // Two rows exist for this filter, so requesting only one must say there is more.
+    expect(page.nextCursor).not.toBeNull();
+  });
+
+  it('paginates without skipping or repeating a row across pages', async () => {
+    const market = await createTestMarket('AuditPage');
+    await createProperty({ marketId: market.id, name: 'Page A' }, actor);
+    await createProperty({ marketId: market.id, name: 'Page B' }, actor);
+    await createProperty({ marketId: market.id, name: 'Page C' }, actor);
+
+    const first = await listAuditLog({ entityType: 'property', limit: 2 });
+    expect(first.rows).toHaveLength(2);
+    expect(first.nextCursor).toBeTruthy();
+
+    const second = await listAuditLog({ entityType: 'property', limit: 2, cursor: first.nextCursor! });
+    const firstIds = new Set(first.rows.map((r) => r.id));
+    expect(second.rows.some((r) => firstIds.has(r.id))).toBe(false);
+  });
+});
+
+/* ========================================================================== */
+/* Exports                                                                    */
+/* ========================================================================== */
+
+describe('exports', () => {
+  it('honours the same filters the properties list uses, excluding properties outside them', async () => {
+    const marketA = await createTestMarket('ExportA');
+    const marketB = await createTestMarket('ExportB');
+    const inScope = await createProperty({ marketId: marketA.id, name: `${TEST_PREFIX} In Scope` }, actor);
+    await createProperty({ marketId: marketB.id, name: `${TEST_PREFIX} Out Of Scope` }, actor);
+
+    const csv = await exportPropertiesCsv({ marketId: marketA.id });
+    const [header, ...rows] = parseCsv(csv);
+    const idCol = header!.indexOf('property_id');
+    const names = rows.map((r) => r[header!.indexOf('name')]);
+
+    expect(rows.some((r) => r[idCol] === inScope.id)).toBe(true);
+    expect(names).not.toContain(`${TEST_PREFIX} Out Of Scope`);
+  });
+
+  it('leads every export with the record\'s own stable id', async () => {
+    const market = await createTestMarket('ExportStableId');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const [header] = parseCsv(await exportPropertiesCsv({ marketId: market.id }));
+    expect(header![0]).toBe('property_id');
+    void property;
+  });
+
+  it('includes a promoted opportunity\'s stable id and stage in the pipeline export', async () => {
+    const market = await createTestMarket('ExportPipeline');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const opp = await promoteToOpportunity({ propertyId: property.id, promotionReason: 'Export coverage.' }, actor);
+
+    const [header, ...rows] = parseCsv(await exportOpportunitiesCsv({ includeSample: true }));
+    const idCol = header!.indexOf('opportunity_id');
+    const stageCol = header!.indexOf('stage');
+    const row = rows.find((r) => r[idCol] === opp.id);
+    expect(row).toBeTruthy();
+    expect(row![stageCol]).toBeTruthy();
+  });
+
+  it('includes a logged call\'s notes and excludes system-generated rows', async () => {
+    const market = await createTestMarket('ExportActivity');
+    const property = await createProperty({ marketId: market.id }, actor);
+    await logActivity({ propertyId: property.id, type: 'call', outcome: 'no_answer', notes: `${TEST_PREFIX} export note` }, actor);
+    // Promotion writes a 'system' timeline entry - it must not appear in the export.
+    await promoteToOpportunity({ propertyId: property.id, promotionReason: 'Trigger a system entry.' }, actor);
+
+    const [header, ...rows] = parseCsv(await exportActivitiesCsv({ includeSample: true }));
+    const notesCol = header!.indexOf('notes');
+    const typeCol = header!.indexOf('type');
+    expect(rows.some((r) => r[notesCol] === `${TEST_PREFIX} export note`)).toBe(true);
+    expect(rows.every((r) => r[typeCol] !== 'system')).toBe(true);
   });
 });

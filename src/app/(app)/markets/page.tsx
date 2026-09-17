@@ -1,23 +1,32 @@
 import Link from 'next/link';
-import { asc, isNull, sql as raw } from 'drizzle-orm';
+import { asc, sql as raw } from 'drizzle-orm';
 import { MapPin, Plus } from 'lucide-react';
 import { db } from '@/db';
 import { markets } from '@/db/schema';
 import { requirePageUser } from '@/lib/auth/guards';
 import { EmptyState } from '@/components/ui/primitives';
+import { MarketRestoreButton, ShowArchivedMarketsToggle } from './market-restore-controls';
 
 export const metadata = { title: 'Markets' };
 export const dynamic = 'force-dynamic';
 
-export default async function MarketsPage() {
+export default async function MarketsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requirePageUser();
+  const sp = await searchParams;
+  const includeArchived = sp.includeArchived === 'true';
 
-  const rows = await db
+  const all = await db
     .select({
       id: markets.id,
       name: markets.name,
       state: markets.state,
       notes: markets.notes,
+      version: markets.version,
+      archivedAt: markets.archivedAt,
       anchorCount: raw<number>`(select count(*)::int from mall_anchors ma
         where ma.market_id = markets.id and ma.archived_at is null)`,
       needsPlacement: raw<number>`(select count(*)::int from mall_anchors ma
@@ -26,8 +35,9 @@ export default async function MarketsPage() {
         where p.market_id = markets.id and p.archived_at is null)`,
     })
     .from(markets)
-    .where(isNull(markets.archivedAt))
     .orderBy(asc(markets.name));
+
+  const rows = includeArchived ? all : all.filter((m) => !m.archivedAt);
 
   return (
     <>
@@ -36,7 +46,8 @@ export default async function MarketsPage() {
           <h1 className="text-base font-semibold tracking-tight text-ink-900">Markets</h1>
           <p className="text-xs text-ink-500">{rows.length} markets</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-3">
+          <ShowArchivedMarketsToggle checked={includeArchived} />
           <Link href="/settings/imports" className="btn-secondary btn-sm">Import malls</Link>
           <Link href="/markets/new" className="btn-primary btn-sm"><Plus size={14} /> New market</Link>
         </div>
@@ -63,9 +74,16 @@ export default async function MarketsPage() {
               <section key={m.id} className="card">
                 <div className="card-header">
                   <div className="min-w-0">
-                    <Link href={`/markets/${m.id}`} className="card-title hover:text-accent-700">
-                      {m.name}
-                    </Link>
+                    <div className="flex items-center gap-1.5">
+                      {m.archivedAt ? (
+                        <span className="card-title text-ink-400 line-through">{m.name}</span>
+                      ) : (
+                        <Link href={`/markets/${m.id}`} className="card-title hover:text-accent-700">
+                          {m.name}
+                        </Link>
+                      )}
+                      {m.archivedAt && <span className="chip border-red-200 bg-red-50 text-red-700">Deleted</span>}
+                    </div>
                     <p className="mt-0.5 text-xs text-ink-500">
                       {m.anchorCount} mall{m.anchorCount === 1 ? '' : 's'} ·
                       {' '}{m.propertyCount} propert{m.propertyCount === 1 ? 'y' : 'ies'}
@@ -76,7 +94,11 @@ export default async function MarketsPage() {
                       )}
                     </p>
                   </div>
-                  <Link href={`/markets/${m.id}`} className="btn-secondary btn-sm">Open market</Link>
+                  {m.archivedAt ? (
+                    <MarketRestoreButton marketId={m.id} version={m.version} />
+                  ) : (
+                    <Link href={`/markets/${m.id}`} className="btn-secondary btn-sm">Open market</Link>
+                  )}
                 </div>
               </section>
             ))

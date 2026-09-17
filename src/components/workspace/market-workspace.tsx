@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Filter, MapPin, Plus, Search, Squircle, Target, Trash2, X,
+  Filter, MapPin, Pencil, Plus, RotateCcw, Search, Squircle, Target, Trash2, X,
 } from 'lucide-react';
 import { Map, type DrawMode, type MapViewHandle } from '@/components/map';
 import type { AreaGeometry, LatLng } from '@/lib/geo/types';
@@ -50,13 +50,17 @@ interface Anchor {
   addressLine1: string | null;
   city: string | null;
   state: string | null;
+  postalCode?: string | null;
+  county?: string | null;
+  notes?: string | null;
   latitude: number | null;
   longitude: number | null;
   needsMapPlacement: boolean;
+  version?: number;
 }
 
 interface Props {
-  market: { id: string; name: string; state: string | null; notes: string | null; version?: number };
+  market: { id: string; name: string; state: string | null; notes: string | null; version: number };
   anchors: Anchor[];
   statuses: Array<{ id: string; label: string; color: string }>;
   tags: Array<{ id: string; name: string; color: string }>;
@@ -90,6 +94,11 @@ export function MarketWorkspace({
   const [busy, setBusy] = useState<string | null>(null);
   const [addingAnchor, setAddingAnchor] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [editingMarket, setEditingMarket] = useState(false);
+  const [marketForm, setMarketForm] = useState({ name: market.name, state: market.state ?? '', notes: market.notes ?? '' });
+  const [editingAnchorId, setEditingAnchorId] = useState<string | null>(null);
+  const [anchorForm, setAnchorForm] = useState({ name: '', addressLine1: '', city: '', state: '', postalCode: '', county: '', notes: '' });
+  const [undoAnchor, setUndoAnchor] = useState<{ id: string; version: number; name: string } | null>(null);
   const [toast, setToast] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [initialView, setInitialView] = useState<{ center: LatLng; zoom: number } | null>(null);
@@ -197,6 +206,100 @@ export function MarketWorkspace({
       setConfirmingDelete(false);
     }
   }, [market.id, router]);
+
+  const saveMarketEdit = useCallback(async () => {
+    setBusy('Saving market…');
+    try {
+      const res = await fetch(`/api/markets/${market.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          version: market.version,
+          name: marketForm.name.trim(),
+          state: marketForm.state.trim() || null,
+          notes: marketForm.notes.trim() || null,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not save the market.');
+      setEditingMarket(false);
+      router.refresh();
+    } catch (err) {
+      flash('error', err instanceof Error ? err.message : 'Could not save the market.');
+    } finally {
+      setBusy(null);
+    }
+  }, [market.id, market.version, marketForm, router]);
+
+  function startEditingAnchor(a: Anchor) {
+    setAnchorForm({
+      name: a.name, addressLine1: a.addressLine1 ?? '', city: a.city ?? '', state: a.state ?? '',
+      postalCode: a.postalCode ?? '', county: a.county ?? '', notes: a.notes ?? '',
+    });
+    setEditingAnchorId(a.id);
+  }
+
+  const saveAnchorEdit = useCallback(async (anchor: Anchor) => {
+    setBusy('Saving mall…');
+    try {
+      const res = await fetch(`/api/mall-anchors/${anchor.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          version: anchor.version ?? 1,
+          name: anchorForm.name.trim(),
+          addressLine1: anchorForm.addressLine1.trim() || null,
+          city: anchorForm.city.trim() || null,
+          state: anchorForm.state.trim() || null,
+          postalCode: anchorForm.postalCode.trim() || null,
+          county: anchorForm.county.trim() || null,
+          notes: anchorForm.notes.trim() || null,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not save this mall.');
+      setEditingAnchorId(null);
+      router.refresh();
+    } catch (err) {
+      flash('error', err instanceof Error ? err.message : 'Could not save this mall.');
+    } finally {
+      setBusy(null);
+    }
+  }, [anchorForm, router]);
+
+  const archiveAnchor = useCallback(async (anchor: Anchor) => {
+    setBusy('Archiving mall…');
+    try {
+      const res = await fetch(`/api/mall-anchors/${anchor.id}`, { method: 'DELETE' });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not archive this mall.');
+      // The anchor row disappears once the page refetches, so the version needed to
+      // undo it has to be captured now, before it becomes unreachable through the UI.
+      setUndoAnchor({ id: anchor.id, version: (anchor.version ?? 1) + 1, name: anchor.name });
+      setTimeout(() => setUndoAnchor((u) => (u?.id === anchor.id ? null : u)), 10_000);
+      router.refresh();
+    } catch (err) {
+      flash('error', err instanceof Error ? err.message : 'Could not archive this mall.');
+    } finally {
+      setBusy(null);
+    }
+  }, [router]);
+
+  const restoreAnchor = useCallback(async () => {
+    if (!undoAnchor) return;
+    setBusy('Restoring mall…');
+    try {
+      const res = await fetch(`/api/mall-anchors/${undoAnchor.id}/restore?version=${undoAnchor.version}`, { method: 'POST' });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not restore this mall.');
+      setUndoAnchor(null);
+      router.refresh();
+    } catch (err) {
+      flash('error', err instanceof Error ? err.message : 'Could not restore this mall.');
+    } finally {
+      setBusy(null);
+    }
+  }, [undoAnchor, router]);
 
   const saveParcel = useCallback(async (propertyId: string, geometry: AreaGeometry) => {
     setBusy('Saving parcel…');
@@ -331,12 +434,45 @@ export function MarketWorkspace({
       {/* ------------------------------------------------------------ Header */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-ink-200 bg-white px-4 py-2.5">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Link href="/markets" className="text-xs text-ink-500 hover:text-accent-700">Markets</Link>
-            <span className="text-ink-300">/</span>
-            <h1 className="truncate text-sm font-semibold text-ink-900">{market.name}</h1>
-            {market.state && <span className="text-xs text-ink-500">{market.state}</span>}
-          </div>
+          {editingMarket ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <input
+                className="input w-40 py-1 text-xs" placeholder="Market name"
+                value={marketForm.name} onChange={(e) => setMarketForm((f) => ({ ...f, name: e.target.value }))}
+              />
+              <input
+                className="input w-14 py-1 text-xs" placeholder="State" maxLength={2}
+                value={marketForm.state} onChange={(e) => setMarketForm((f) => ({ ...f, state: e.target.value }))}
+              />
+              <input
+                className="input w-48 py-1 text-xs" placeholder="Notes"
+                value={marketForm.notes} onChange={(e) => setMarketForm((f) => ({ ...f, notes: e.target.value }))}
+              />
+              <button type="button" className="btn-primary btn-sm" onClick={() => void saveMarketEdit()} disabled={busy !== null}>
+                Save
+              </button>
+              <button
+                type="button" className="btn-ghost btn-sm"
+                onClick={() => { setEditingMarket(false); setMarketForm({ name: market.name, state: market.state ?? '', notes: market.notes ?? '' }); }}
+                disabled={busy !== null}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Link href="/markets" className="text-xs text-ink-500 hover:text-accent-700">Markets</Link>
+              <span className="text-ink-300">/</span>
+              <h1 className="truncate text-sm font-semibold text-ink-900">{market.name}</h1>
+              {market.state && <span className="text-xs text-ink-500">{market.state}</span>}
+              <button
+                type="button" className="btn-ghost btn-sm" title="Edit this market"
+                onClick={() => { setMarketForm({ name: market.name, state: market.state ?? '', notes: market.notes ?? '' }); setEditingMarket(true); }}
+              >
+                <Pencil size={12} />
+              </button>
+            </div>
+          )}
           <p className="text-xs text-ink-500">
             {anchors.length} mall{anchors.length === 1 ? '' : 's'} · {visible.length} of {properties.length} properties
             {activeFilterCount > 0 && ' (filtered)'}
@@ -536,6 +672,17 @@ export function MarketWorkspace({
               </div>
             )}
 
+            {undoAnchor && (
+              <div className="border-b border-ink-200 p-3">
+                <div className="banner-info flex items-center justify-between gap-2">
+                  <span>Archived &ldquo;{undoAnchor.name}&rdquo;.</span>
+                  <button type="button" className="btn-secondary btn-sm shrink-0" onClick={() => void restoreAnchor()}>
+                    <RotateCcw size={12} /> Undo
+                  </button>
+                </div>
+              </div>
+            )}
+
             {placedAnchors.length > 0 && (
               <section className="border-b border-ink-200 p-3">
                 <div className="mb-2 flex items-center justify-between">
@@ -544,23 +691,74 @@ export function MarketWorkspace({
                 </div>
                 <ul className="space-y-1">
                   {placedAnchors.map((a) => (
-                    <li key={a.id} className="flex items-center justify-between gap-2 rounded-md border border-ink-200 px-2 py-1.5">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm text-ink-900">{a.name}</div>
-                        <div className="truncate text-[11px] text-ink-500">
-                          {[a.addressLine1, a.city, a.state].filter(Boolean).join(', ') || 'No address recorded'}
+                    editingAnchorId === a.id ? (
+                      <li key={a.id} className="space-y-1.5 rounded-md border border-accent-300 bg-accent-50/40 p-2">
+                        <input
+                          className="input py-1 text-xs" placeholder="Name"
+                          value={anchorForm.name} onChange={(e) => setAnchorForm((f) => ({ ...f, name: e.target.value }))}
+                        />
+                        <input
+                          className="input py-1 text-xs" placeholder="Street address"
+                          value={anchorForm.addressLine1} onChange={(e) => setAnchorForm((f) => ({ ...f, addressLine1: e.target.value }))}
+                        />
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <input
+                            className="input py-1 text-xs" placeholder="City"
+                            value={anchorForm.city} onChange={(e) => setAnchorForm((f) => ({ ...f, city: e.target.value }))}
+                          />
+                          <input
+                            className="input py-1 text-xs" placeholder="State" maxLength={2}
+                            value={anchorForm.state} onChange={(e) => setAnchorForm((f) => ({ ...f, state: e.target.value }))}
+                          />
+                          <input
+                            className="input py-1 text-xs" placeholder="ZIP"
+                            value={anchorForm.postalCode} onChange={(e) => setAnchorForm((f) => ({ ...f, postalCode: e.target.value }))}
+                          />
                         </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="btn-ghost btn-sm shrink-0"
-                        onClick={() => a.latitude != null && a.longitude != null
-                          && mapRef.current?.panTo({ lat: a.latitude, lng: a.longitude }, 15)}
-                        title="Centre the map on this mall"
-                      >
-                        <MapPin size={13} />
-                      </button>
-                    </li>
+                        <div className="flex justify-end gap-1.5">
+                          <button type="button" className="btn-ghost btn-sm" onClick={() => setEditingAnchorId(null)} disabled={busy !== null}>
+                            Cancel
+                          </button>
+                          <button type="button" className="btn-primary btn-sm" onClick={() => void saveAnchorEdit(a)} disabled={busy !== null}>
+                            Save
+                          </button>
+                        </div>
+                      </li>
+                    ) : (
+                      <li key={a.id} className="flex items-center justify-between gap-2 rounded-md border border-ink-200 px-2 py-1.5">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm text-ink-900">{a.name}</div>
+                          <div className="truncate text-[11px] text-ink-500">
+                            {[a.addressLine1, a.city, a.state].filter(Boolean).join(', ') || 'No address recorded'}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          <button
+                            type="button"
+                            className="btn-ghost btn-sm"
+                            onClick={() => a.latitude != null && a.longitude != null
+                              && mapRef.current?.panTo({ lat: a.latitude, lng: a.longitude }, 15)}
+                            title="Centre the map on this mall"
+                          >
+                            <MapPin size={13} />
+                          </button>
+                          <button
+                            type="button" className="btn-ghost btn-sm" title="Edit this mall"
+                            onClick={() => startEditingAnchor(a)}
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          {isAdmin && (
+                            <button
+                              type="button" className="btn-ghost btn-sm text-red-600 hover:bg-red-50" title="Archive this mall"
+                              onClick={() => void archiveAnchor(a)}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    )
                   ))}
                 </ul>
               </section>
