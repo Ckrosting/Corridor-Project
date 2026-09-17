@@ -58,6 +58,43 @@ export async function updateContact(
 }
 
 /**
+ * Archives a person everywhere at once - they drop out of the contacts list,
+ * search and exports. Their property links are deliberately left in place, so
+ * every call, activity and audit entry that names them still reads correctly
+ * and the person can be restored intact. Removing someone from a single
+ * property is a different operation: unlinkContactFromProperty.
+ */
+export async function archiveContact(id: string, actor: Actor) {
+  const [contact] = await db.update(contacts)
+    .set({ archivedAt: new Date() })
+    .where(eq(contacts.id, id))
+    .returning();
+  if (!contact) throw new NotFoundError('Contact');
+
+  await recordAudit({
+    entityType: 'contact', entityId: id, action: 'archive',
+    summary: `Archived contact "${contact.name}"`,
+    actor,
+  });
+
+  return contact;
+}
+
+export async function restoreContact(id: string, version: number, actor: Actor) {
+  const contact = await updateWithVersion<typeof contacts.$inferSelect>({
+    table: contacts, id, expectedVersion: version, values: { archivedAt: null }, entityLabel: 'contact',
+  });
+
+  await recordAudit({
+    entityType: 'contact', entityId: id, action: 'restore',
+    summary: `Restored contact "${contact.name}"`,
+    actor,
+  });
+
+  return contact;
+}
+
+/**
  * Links a contact to a property - an existing contact by id, or a brand new
  * one described inline, whichever the caller has. Re-linking someone already
  * attached under the same relationship updates that link's isPrimary/notes

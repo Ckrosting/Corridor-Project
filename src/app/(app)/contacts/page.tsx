@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { and, asc, isNull, or, sql as raw } from 'drizzle-orm';
+import { and, asc, isNull, or, type SQL, sql as raw } from 'drizzle-orm';
 import { Users } from 'lucide-react';
 import { db } from '@/db';
 import { contacts, ownerEntities } from '@/db/schema';
@@ -7,6 +7,7 @@ import { requirePageUser } from '@/lib/auth/guards';
 import { CONTACT_ROLE_LABELS, formatDate } from '@/lib/format';
 import { EmptyState, StatusChip, Value } from '@/components/ui/primitives';
 import { ContactSearch } from './contact-search';
+import { ContactRestoreButton, ShowArchivedContactsToggle } from './contact-archive-controls';
 
 export const metadata = { title: 'Contacts' };
 export const dynamic = 'force-dynamic';
@@ -20,8 +21,10 @@ export default async function ContactsPage({
   const sp = await searchParams;
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q)?.trim();
   const role = (Array.isArray(sp.role) ? sp.role[0] : sp.role)?.trim();
+  const includeArchived = (Array.isArray(sp.includeArchived) ? sp.includeArchived[0] : sp.includeArchived) === 'true';
 
-  const conds = [isNull(contacts.archivedAt)];
+  const conds: SQL[] = [];
+  if (!includeArchived) conds.push(isNull(contacts.archivedAt));
   if (q) {
     const like = `%${q.toLowerCase()}%`;
     conds.push(or(
@@ -44,6 +47,8 @@ export default async function ContactsPage({
       email: contacts.email,
       source: contacts.source,
       verifiedAt: contacts.verifiedAt,
+      archivedAt: contacts.archivedAt,
+      version: contacts.version,
       ownerEntityName: ownerEntities.name,
       // One contact can relate to many properties; that link count is the point.
       propertyCount: raw<number>`(select count(*)::int from property_contacts pc
@@ -64,7 +69,10 @@ export default async function ContactsPage({
             {rows.length} reusable contact{rows.length === 1 ? '' : 's'} · one contact can relate to many properties
           </p>
         </div>
-        <Link href="/api/export/contacts" className="btn-secondary btn-sm" prefetch={false}>Export CSV</Link>
+        <div className="flex items-center gap-3">
+          <ShowArchivedContactsToggle checked={includeArchived} />
+          <Link href="/api/export/contacts" className="btn-secondary btn-sm" prefetch={false}>Export CSV</Link>
+        </div>
       </header>
 
       <ContactSearch />
@@ -89,15 +97,24 @@ export default async function ContactsPage({
                 <th className="w-52">Email</th>
                 <th className="w-24 text-right">Properties</th>
                 <th className="w-40">Source</th>
+                <th className="w-24" />
               </tr>
             </thead>
             <tbody>
               {rows.map((c) => (
                 <tr key={c.id}>
                   <td>
-                    <Link href={`/contacts/${c.id}`} className="font-medium text-ink-900 hover:text-accent-700">
-                      {c.name}
-                    </Link>
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        href={`/contacts/${c.id}`}
+                        className={c.archivedAt
+                          ? 'font-medium text-ink-400 line-through hover:text-accent-700'
+                          : 'font-medium text-ink-900 hover:text-accent-700'}
+                      >
+                        {c.name}
+                      </Link>
+                      {c.archivedAt && <span className="chip border-red-200 bg-red-50 text-red-700">Archived</span>}
+                    </div>
                     {c.title && <div className="text-[11px] text-ink-500">{c.title}</div>}
                   </td>
                   <td className="text-xs">
@@ -121,6 +138,9 @@ export default async function ContactsPage({
                   <td className="text-[11px] text-ink-500">
                     <Value>{c.source}</Value>
                     <div>{c.verifiedAt ? `verified ${formatDate(c.verifiedAt)}` : 'not verified'}</div>
+                  </td>
+                  <td className="text-right">
+                    {c.archivedAt && <ContactRestoreButton contactId={c.id} version={c.version} />}
                   </td>
                 </tr>
               ))}

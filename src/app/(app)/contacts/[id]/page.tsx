@@ -10,6 +10,7 @@ import {
   formatAddress, formatDate, formatDateTime, propertyTitle,
 } from '@/lib/format';
 import { EmptyState, Field, StatusChip, Value } from '@/components/ui/primitives';
+import { ContactArchiveButton, ContactRestoreButton } from '../contact-archive-controls';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +21,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function ContactPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePageUser();
+  const actor = await requirePageUser();
   const { id } = await params;
 
   const [contact] = await db
@@ -68,6 +69,14 @@ export default async function ContactPage({ params }: { params: Promise<{ id: st
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-lg font-semibold tracking-tight text-ink-900">{c.name}</h1>
           <StatusChip label={CONTACT_ROLE_LABELS[c.role] ?? c.role} />
+          {c.archivedAt && <span className="chip border-red-200 bg-red-50 text-red-700">Archived</span>}
+          {actor.role === 'admin' && (
+            <span className="ml-auto">
+              {c.archivedAt
+                ? <ContactRestoreButton contactId={c.id} version={c.version} />
+                : <ContactArchiveButton contactId={c.id} name={c.name} />}
+            </span>
+          )}
         </div>
         <p className="text-xs text-ink-500">
           {[c.title, c.company].filter(Boolean).join(' · ') || 'No company recorded'}
