@@ -6,15 +6,15 @@ import {
   properties, propertyContacts, propertyParcels, propertyTags, tags, users,
 } from '@/db/schema';
 import {
-  createParcel, createProperty, getPropertyDetail, updateParcel, updateProperty,
+  createParcel, createProperty, getPropertyDetail, listProperties, updateParcel, updateProperty,
 } from '@/lib/services/properties';
 import {
   changeOutreachStatus, deleteActivity, getContactedButNotPromoted, getFollowUps, logActivity,
   setFollowUp, updateActivity,
 } from '@/lib/services/activities';
 import {
-  createContact, linkContactToProperty, unlinkContactFromProperty,
-  updateContact, updatePropertyContactLink,
+  archiveContact, createContact, linkContactToProperty, restoreContact,
+  unlinkContactFromProperty, updateContact, updatePropertyContactLink,
 } from '@/lib/services/contacts';
 import { promoteToOpportunity, setOpportunityState, updateOpportunity } from '@/lib/services/opportunities';
 import { dealValue, pipelineTotal } from '@/lib/pipeline-value';
@@ -677,6 +677,41 @@ describe('contacts', () => {
 
     await expect(updateContact(contact.id, { version: 1, phone: '555-0301' }, actor)).rejects.toThrow(ConflictError);
   });
+
+  it('archives a contact out of the active list while every property link keeps their name', async () => {
+    const market = await createTestMarket('ContactArchive');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const contact = await createContact({ name: `${TEST_PREFIX} Archive Me` }, actor);
+    await linkContactToProperty({ propertyId: property.id, contactId: contact.id, relationship: 'broker', isPrimary: true, actor });
+
+    await archiveContact(contact.id, actor);
+
+    const active = await db.select().from(contacts).where(isNull(contacts.archivedAt));
+    expect(active.some((c) => c.id === contact.id)).toBe(false);
+
+    // Archiving is global, not an unlink: the property still shows this person.
+    const detail = await getPropertyDetail(property.id);
+    expect(detail.contacts.map((pc) => pc.contact.name)).toContain(`${TEST_PREFIX} Archive Me`);
+  });
+
+  it('restores an archived contact back into the active list', async () => {
+    const contact = await createContact({ name: `${TEST_PREFIX} Restore Me` }, actor);
+    const archived = await archiveContact(contact.id, actor);
+    expect(archived.archivedAt).not.toBeNull();
+
+    const restored = await restoreContact(contact.id, archived.version, actor);
+    expect(restored.archivedAt).toBeNull();
+
+    const active = await db.select().from(contacts).where(isNull(contacts.archivedAt));
+    expect(active.some((c) => c.id === contact.id)).toBe(true);
+  });
+
+  it('rejects a restore that carries a stale version', async () => {
+    const contact = await createContact({ name: `${TEST_PREFIX} Stale Restore` }, actor);
+    const archived = await archiveContact(contact.id, actor);
+
+    await expect(restoreContact(contact.id, archived.version - 1, actor)).rejects.toThrow(ConflictError);
+  });
 });
 
 /* ========================================================================== */
@@ -941,5 +976,102 @@ describe('exports', () => {
     const typeCol = header!.indexOf('type');
     expect(rows.some((r) => r[notesCol] === `${TEST_PREFIX} export note`)).toBe(true);
     expect(rows.every((r) => r[typeCol] !== 'system')).toBe(true);
+  });
+});
+
+/* ========================================================================== */
+/* Property list filters                                                      */
+/* ========================================================================== */
+
+describe('property list filters', () => {
+  const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id);
+
+  it('finds properties with no contact on file and excludes ones that have one', async () => {
+    const market = await createTestMarket('NoContact');
+    const bare = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Bare` }, actor);
+    const linked = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Linked` }, actor);
+    const contact = await createContact({ name: `${TEST_PREFIX} Filter Broker` }, actor);
+    await linkContactToProperty({ propertyId: linked.id, contactId: contact.id, relationship: 'broker', isPrimary: true, actor });
+
+    const rows = ids(await listProperties({ marketId: market.id, hasContact: false }));
+    expect(rows).toContain(bare.id);
+    expect(rows).not.toContain(linked.id);
+
+    const withContact = ids(await listProperties({ marketId: market.id, hasContact: true }));
+    expect(withContact).toEqual([linked.id]);
+  });
+
+  it('treats a never-contacted property as stale and excludes one contacted today', async () => {
+    const market = await createTestMarket('Stale');
+    const never = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Never` }, actor);
+    const old = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Old` }, actor);
+    const fresh = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Fresh` }, actor);
+
+    const longAgo = new Date(Date.now() - 200 * 86_400_000).toISOString();
+    await logActivity({ propertyId: old.id, type: 'call', occurredAt: longAgo, notes: 'Ancient call' }, actor);
+    await logActivity({ propertyId: fresh.id, type: 'call', notes: 'Called just now' }, actor);
+
+    const rows = ids(await listProperties({ marketId: market.id, notContactedInDays: 30 }));
+    expect(rows).toContain(never.id);
+    expect(rows).toContain(old.id);
+    expect(rows).not.toContain(fresh.id);
+  });
+
+  it('ignores a status change when deciding how long since the last contact', async () => {
+    const market = await createTestMarket('StatusOnly');
+    const property = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} StatusOnly` }, actor);
+    const status = await statusByKey('in_conversation');
+    await changeOutreachStatus(property.id, status.id, null, actor);
+
+    const rows = ids(await listProperties({ marketId: market.id, notContactedInDays: 30 }));
+    expect(rows).toContain(property.id);
+  });
+
+  it('isolates properties with no asking price', async () => {
+    const market = await createTestMarket('NoPrice');
+    const blank = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Blank Price` }, actor);
+    const priced = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Priced`, askingPrice: '1250000.00' }, actor);
+
+    const rows = ids(await listProperties({ marketId: market.id, missingAskingPrice: true }));
+    expect(rows).toContain(blank.id);
+    expect(rows).not.toContain(priced.id);
+  });
+
+  it('isolates properties whose follow-up date has already passed', async () => {
+    const market = await createTestMarket('Overdue');
+    const overdue = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Overdue` }, actor);
+    const later = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Later` }, actor);
+    const none = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Unscheduled` }, actor);
+
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    await setFollowUp(overdue.id, day(-5), actor);
+    await setFollowUp(later.id, day(30), actor);
+
+    const rows = ids(await listProperties({ marketId: market.id, overdueFollowUp: true }));
+    expect(rows).toEqual([overdue.id]);
+    expect(rows).not.toContain(none.id);
+  });
+
+  it('narrows the list to the tagged property when filtering by tag', async () => {
+    const market = await createTestMarket('TagFilter');
+    const [tag] = await db.insert(tags).values({ name: `${TEST_PREFIX} Corner Lot`, color: '#334155' }).returning();
+    const tagged = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Tagged`, tagIds: [tag!.id] }, actor);
+    const untagged = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Untagged` }, actor);
+
+    const rows = ids(await listProperties({ marketId: market.id, tagIds: [tag!.id] }));
+    expect(rows).toEqual([tagged.id]);
+    expect(rows).not.toContain(untagged.id);
+  });
+
+  it('combines the new filters rather than letting the last one win', async () => {
+    const market = await createTestMarket('Combined');
+    const both = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Both` }, actor);
+    const priceOnly = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Price Only`, askingPrice: '900000.00' }, actor);
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    await setFollowUp(both.id, day(-2), actor);
+    await setFollowUp(priceOnly.id, day(-2), actor);
+
+    const rows = ids(await listProperties({ marketId: market.id, overdueFollowUp: true, missingAskingPrice: true }));
+    expect(rows).toEqual([both.id]);
   });
 });

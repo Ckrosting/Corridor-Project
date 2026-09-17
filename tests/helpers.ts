@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { eq, inArray, like } from 'drizzle-orm';
 import { db } from '@/db';
 import {
-  contacts, markets, opportunities, outreachStatuses, properties,
+  contacts, markets, opportunities, outreachStatuses, ownerEntities, properties,
   tags, transactionStages, users,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
@@ -114,4 +114,8 @@ export async function cleanupTestData() {
 
   // Tags are a shared global vocabulary, not market-scoped, same reasoning as contacts above.
   await db.delete(tags).where(like(tags.name, `${TEST_PREFIX}%`));
+
+  // Owner entities are not market-scoped either; properties reference them with
+  // ON DELETE SET NULL, so they outlive the test properties that pointed at them.
+  await db.delete(ownerEntities).where(like(ownerEntities.name, `${TEST_PREFIX}%`));
 }
