@@ -1,10 +1,14 @@
 import Link from 'next/link';
+import { asc, isNull } from 'drizzle-orm';
 import { CalendarClock, CalendarX2 } from 'lucide-react';
+import { db } from '@/db';
+import { markets } from '@/db/schema';
 import { requirePageUser } from '@/lib/auth/guards';
 import { getFollowUps, type FollowUpBucket } from '@/lib/services/activities';
 import { showSampleData } from '@/lib/services/settings';
 import { formatAddress, formatDate, formatDateTime, propertyTitle, relativeDays } from '@/lib/format';
 import { EmptyState, SampleBadge, StatusChip } from '@/components/ui/primitives';
+import { FollowUpFiltersBar, FollowUpRowActions } from './follow-up-controls';
 
 export const metadata = { title: 'Follow-ups' };
 export const dynamic = 'force-dynamic';
@@ -24,13 +28,21 @@ const BUCKETS: Array<{
   },
 ];
 
-export default async function FollowUpsPage() {
+export default async function FollowUpsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requirePageUser();
+  const sp = await searchParams;
+  const marketId = (Array.isArray(sp.marketId) ? sp.marketId[0] : sp.marketId) || undefined;
   const includeSample = await showSampleData();
 
-  const results = await Promise.all(
-    BUCKETS.map((b) => getFollowUps(b.key, { includeSample, limit: 300 })),
-  );
+  const [marketList, results] = await Promise.all([
+    db.select({ id: markets.id, name: markets.name }).from(markets)
+      .where(isNull(markets.archivedAt)).orderBy(asc(markets.name)),
+    Promise.all(BUCKETS.map((b) => getFollowUps(b.key, { marketId, includeSample, limit: 300 }))),
+  ]);
 
   const total = results.reduce((sum, r) => sum + r.length, 0);
 
@@ -41,6 +53,7 @@ export default async function FollowUpsPage() {
           <h1 className="text-base font-semibold tracking-tight text-ink-900">Follow-ups</h1>
           <p className="text-xs text-ink-500">{total} propert{total === 1 ? 'y' : 'ies'} in your queues</p>
         </div>
+        <FollowUpFiltersBar markets={marketList} />
       </header>
 
       <div className="scroll-thin flex-1 overflow-y-auto p-6">
@@ -94,6 +107,7 @@ export default async function FollowUpsPage() {
                         <th className="w-40">Outreach status</th>
                         <th className="w-36">Follow-up</th>
                         <th className="w-40">Last activity</th>
+                        <th className="w-[19rem]">Reschedule</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -129,6 +143,9 @@ export default async function FollowUpsPage() {
                               {r.lastActivityAt
                                 ? formatDateTime(r.lastActivityAt)
                                 : <span className="unknown">No calls logged</span>}
+                            </td>
+                            <td>
+                              <FollowUpRowActions propertyId={r.id} currentDate={r.nextFollowUpDate} />
                             </td>
                           </tr>
                         );
