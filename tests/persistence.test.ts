@@ -9,14 +9,15 @@ import {
   createParcel, createProperty, getPropertyDetail, updateParcel, updateProperty,
 } from '@/lib/services/properties';
 import {
-  changeOutreachStatus, getContactedButNotPromoted, getFollowUps, logActivity, setFollowUp,
+  changeOutreachStatus, deleteActivity, getContactedButNotPromoted, getFollowUps, logActivity,
+  setFollowUp, updateActivity,
 } from '@/lib/services/activities';
 import {
   createContact, linkContactToProperty, unlinkContactFromProperty,
   updateContact, updatePropertyContactLink,
 } from '@/lib/services/contacts';
 import { promoteToOpportunity, setOpportunityState } from '@/lib/services/opportunities';
-import { ConflictError } from '@/lib/errors';
+import { ConflictError, ValidationError } from '@/lib/errors';
 import { areaAcres, pointInGeometry } from '@/lib/geo/polygon';
 import type { Actor } from '@/lib/auth/guards';
 import {
@@ -172,6 +173,42 @@ describe('call history and follow-ups', () => {
     expect(callsAfter.map((c) => c.notes).sort()).toEqual(['First try', 'Second try']);
     // And the status changes were APPENDED, not substituted.
     expect(after.filter((a) => a.type === 'status_change')).toHaveLength(2);
+  });
+
+  it('edits a logged call and stamps editedAt without disturbing who logged it', async () => {
+    const market = await createTestMarket('ActivityEdit');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const activity = await logActivity({ propertyId: property.id, type: 'call', outcome: 'no_answer', notes: 'Typo her' }, actor);
+
+    const updated = await updateActivity(activity.id, { notes: 'Typo here', outcome: 'voicemail_left' }, actor);
+    expect(updated.notes).toBe('Typo here');
+    expect(updated.outcome).toBe('voicemail_left');
+    expect(updated.editedAt).toBeTruthy();
+    expect(updated.authorLabel).toBe(actor.name);
+    expect(updated.createdAt).toEqual(activity.createdAt);
+  });
+
+  it('deletes a mis-logged activity entirely', async () => {
+    const market = await createTestMarket('ActivityDelete');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const activity = await logActivity({ propertyId: property.id, type: 'note', notes: 'Logged against the wrong property' }, actor);
+
+    await deleteActivity(activity.id, actor);
+    const [gone] = await db.select().from(activities).where(eq(activities.id, activity.id));
+    expect(gone).toBeUndefined();
+  });
+
+  it('refuses to edit or delete a system-generated status_change entry', async () => {
+    const market = await createTestMarket('ActivityGuard');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const inConversation = await statusByKey('in_conversation');
+    await changeOutreachStatus(property.id, inConversation.id, null, actor);
+
+    const [statusEntry] = await db.select().from(activities)
+      .where(and(eq(activities.propertyId, property.id), eq(activities.type, 'status_change')));
+
+    await expect(updateActivity(statusEntry!.id, { notes: 'tampered' }, actor)).rejects.toThrow(ValidationError);
+    await expect(deleteActivity(statusEntry!.id, actor)).rejects.toThrow(ValidationError);
   });
 
   it('keeps the follow-up date across reloads and allows clearing it', async () => {

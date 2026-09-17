@@ -69,6 +69,7 @@ interface PropertyDetailData {
     id: string; type: string; outcome: string | null; subject: string | null; notes: string | null;
     occurredAt: string; authorLabel: string | null; contactName: string | null;
     sellerMotivation: string | null; pricingExpectation: string | null; timingNotes: string | null;
+    editedAt: string | null;
   }>;
   listingSources: Array<{ id: string; url: string; sourceName: string | null }>;
   opportunities: Array<{ id: string; name: string; state: string; stageLabel: string | null; stageColor: string | null; promotedAt: string; promotionReason: string }>;
@@ -100,6 +101,29 @@ const emptyContactForm = (): ContactForm => ({
 /** Empty string means "not set", never the literal value - matches the pattern in property-editor.tsx. */
 const blank = (v: string): string | null => (v.trim() === '' ? null : v.trim());
 
+/** Mirrors the server-side restriction in activities.ts: status_change/system rows are not user edits. */
+const EDITABLE_ACTIVITY_TYPES = new Set(['call', 'note', 'email', 'meeting']);
+
+interface ActivityForm {
+  occurredAt: string;
+  outcome: string;
+  notes: string;
+  sellerMotivation: string;
+  pricingExpectation: string;
+  timingNotes: string;
+}
+
+const emptyActivityForm = (): ActivityForm => ({
+  occurredAt: '', outcome: '', notes: '', sellerMotivation: '', pricingExpectation: '', timingNotes: '',
+});
+
+/** `<input type="datetime-local">` wants local wall-clock time, not the UTC an ISO string carries. */
+function toLocalInputValue(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /**
  * The property side panel.
  *
@@ -127,6 +151,12 @@ export function PropertyPanel({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
+  const [activityForm, setActivityForm] = useState(emptyActivityForm());
+  const [activityBusy, setActivityBusy] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
+  const [confirmingDeleteActivityId, setConfirmingDeleteActivityId] = useState<string | null>(null);
 
   const [addingContact, setAddingContact] = useState(false);
   const [editingContactKey, setEditingContactKey] = useState<string | null>(null);
@@ -290,6 +320,64 @@ export function PropertyPanel({
       isPrimary: current.isPrimary,
     });
     setEditingContactKey(`${current.contact.id}-${current.relationship}`);
+  }
+
+  function startEditingActivity(t: PropertyDetailData['timeline'][number]) {
+    setActivityError(null);
+    setActivityForm({
+      occurredAt: toLocalInputValue(t.occurredAt),
+      outcome: t.outcome ?? '',
+      notes: t.notes ?? '',
+      sellerMotivation: t.sellerMotivation ?? '',
+      pricingExpectation: t.pricingExpectation ?? '',
+      timingNotes: t.timingNotes ?? '',
+    });
+    setEditingActivityId(t.id);
+  }
+
+  async function saveActivityEdit(id: string) {
+    setActivityBusy(true);
+    setActivityError(null);
+    try {
+      const res = await fetch(`/api/activities/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          occurredAt: new Date(activityForm.occurredAt).toISOString(),
+          outcome: activityForm.outcome || null,
+          notes: blank(activityForm.notes),
+          sellerMotivation: blank(activityForm.sellerMotivation),
+          pricingExpectation: blank(activityForm.pricingExpectation),
+          timingNotes: blank(activityForm.timingNotes),
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not save this entry.');
+      setEditingActivityId(null);
+      void load();
+      onChanged();
+    } catch (err) {
+      setActivityError(err instanceof Error ? err.message : 'Could not save this entry.');
+    } finally {
+      setActivityBusy(false);
+    }
+  }
+
+  async function removeActivity(id: string) {
+    setActivityBusy(true);
+    setActivityError(null);
+    try {
+      const res = await fetch(`/api/activities/${id}`, { method: 'DELETE' });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not delete this entry.');
+      setConfirmingDeleteActivityId(null);
+      void load();
+      onChanged();
+    } catch (err) {
+      setActivityError(err instanceof Error ? err.message : 'Could not delete this entry.');
+    } finally {
+      setActivityBusy(false);
+    }
   }
 
   if (loading && !data) {
@@ -485,32 +573,124 @@ export function PropertyPanel({
 
             <div className="mt-4">
               <SectionHeading>Activity timeline</SectionHeading>
+              {activityError && <div className="banner-error mb-2" role="alert">{activityError}</div>}
               {data.timeline.length === 0 ? (
                 <EmptyState title="No activity yet" body="Logged calls, notes and status changes appear here with who recorded them and when." />
               ) : (
                 <ol className="space-y-2.5">
-                  {data.timeline.map((t) => (
-                    <li key={t.id} className="border-l-2 border-ink-200 pl-3">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-xs font-semibold text-ink-800">
-                          {t.outcome ? CALL_OUTCOME_LABELS[t.outcome] ?? t.outcome : t.subject ?? ACTIVITY_TYPE_LABELS[t.type] ?? t.type}
-                        </span>
-                        <span className="shrink-0 text-[11px] text-ink-400">{formatDateTime(t.occurredAt)}</span>
-                      </div>
-                      {t.contactName && <div className="text-[11px] text-ink-500">with {t.contactName}</div>}
-                      {t.notes && <p className="mt-0.5 whitespace-pre-wrap text-xs text-ink-700">{t.notes}</p>}
-                      {t.sellerMotivation && (
-                        <p className="mt-1 text-xs"><span className="font-medium text-ink-600">Motivation:</span> {t.sellerMotivation}</p>
-                      )}
-                      {t.pricingExpectation && (
-                        <p className="text-xs"><span className="font-medium text-ink-600">Pricing:</span> {t.pricingExpectation}</p>
-                      )}
-                      {t.timingNotes && (
-                        <p className="text-xs"><span className="font-medium text-ink-600">Timing:</span> {t.timingNotes}</p>
-                      )}
-                      <div className="mt-0.5 text-[11px] text-ink-400">{t.authorLabel ?? 'Unknown author'}</div>
-                    </li>
-                  ))}
+                  {data.timeline.map((t) => {
+                    const editable = EDITABLE_ACTIVITY_TYPES.has(t.type);
+
+                    if (editingActivityId === t.id) {
+                      return (
+                        <li key={t.id} className="rounded-md border border-accent-300 bg-accent-50/40 p-2.5">
+                          <div className="space-y-2">
+                            <input
+                              type="datetime-local" className="input text-xs"
+                              value={activityForm.occurredAt}
+                              onChange={(e) => setActivityForm((f) => ({ ...f, occurredAt: e.target.value }))}
+                            />
+                            {t.type === 'call' && (
+                              <select
+                                className="input text-xs" value={activityForm.outcome}
+                                onChange={(e) => setActivityForm((f) => ({ ...f, outcome: e.target.value }))}
+                              >
+                                <option value="">No outcome</option>
+                                {Object.entries(CALL_OUTCOME_LABELS).map(([value, label]) => (
+                                  <option key={value} value={value}>{label}</option>
+                                ))}
+                              </select>
+                            )}
+                            <textarea
+                              className="input text-xs" rows={2} placeholder="Notes"
+                              value={activityForm.notes}
+                              onChange={(e) => setActivityForm((f) => ({ ...f, notes: e.target.value }))}
+                            />
+                            <textarea
+                              className="input text-xs" rows={2} placeholder="Seller motivation"
+                              value={activityForm.sellerMotivation}
+                              onChange={(e) => setActivityForm((f) => ({ ...f, sellerMotivation: e.target.value }))}
+                            />
+                            <textarea
+                              className="input text-xs" rows={2} placeholder="Pricing expectation"
+                              value={activityForm.pricingExpectation}
+                              onChange={(e) => setActivityForm((f) => ({ ...f, pricingExpectation: e.target.value }))}
+                            />
+                            <input
+                              className="input text-xs" placeholder="Timing"
+                              value={activityForm.timingNotes}
+                              onChange={(e) => setActivityForm((f) => ({ ...f, timingNotes: e.target.value }))}
+                            />
+                          </div>
+                          <div className="mt-2 flex justify-end gap-2">
+                            <button type="button" className="btn-ghost btn-sm" onClick={() => setEditingActivityId(null)} disabled={activityBusy}>
+                              Cancel
+                            </button>
+                            <button type="button" className="btn-primary btn-sm" onClick={() => void saveActivityEdit(t.id)} disabled={activityBusy}>
+                              {activityBusy && <Spinner />} Save
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    }
+
+                    return (
+                      <li key={t.id} className="border-l-2 border-ink-200 pl-3">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-xs font-semibold text-ink-800">
+                            {t.outcome ? CALL_OUTCOME_LABELS[t.outcome] ?? t.outcome : t.subject ?? ACTIVITY_TYPE_LABELS[t.type] ?? t.type}
+                          </span>
+                          <span className="flex shrink-0 items-center gap-1">
+                            <span className="text-[11px] text-ink-400">{formatDateTime(t.occurredAt)}</span>
+                            {editable && (
+                              confirmingDeleteActivityId === t.id ? (
+                                <>
+                                  <button
+                                    type="button" className="text-[11px] font-medium text-red-600 hover:underline"
+                                    onClick={() => void removeActivity(t.id)} disabled={activityBusy}
+                                  >
+                                    Confirm
+                                  </button>
+                                  <button
+                                    type="button" className="text-[11px] text-ink-500 hover:underline"
+                                    onClick={() => setConfirmingDeleteActivityId(null)} disabled={activityBusy}
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button type="button" className="btn-ghost btn-sm" title="Edit this entry" onClick={() => startEditingActivity(t)}>
+                                    <Pencil size={11} />
+                                  </button>
+                                  <button
+                                    type="button" className="btn-ghost btn-sm text-red-600 hover:bg-red-50" title="Delete this entry"
+                                    onClick={() => setConfirmingDeleteActivityId(t.id)}
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </>
+                              )
+                            )}
+                          </span>
+                        </div>
+                        {t.contactName && <div className="text-[11px] text-ink-500">with {t.contactName}</div>}
+                        {t.notes && <p className="mt-0.5 whitespace-pre-wrap text-xs text-ink-700">{t.notes}</p>}
+                        {t.sellerMotivation && (
+                          <p className="mt-1 text-xs"><span className="font-medium text-ink-600">Motivation:</span> {t.sellerMotivation}</p>
+                        )}
+                        {t.pricingExpectation && (
+                          <p className="text-xs"><span className="font-medium text-ink-600">Pricing:</span> {t.pricingExpectation}</p>
+                        )}
+                        {t.timingNotes && (
+                          <p className="text-xs"><span className="font-medium text-ink-600">Timing:</span> {t.timingNotes}</p>
+                        )}
+                        <div className="mt-0.5 text-[11px] text-ink-400">
+                          {t.authorLabel ?? 'Unknown author'}{t.editedAt && ` · edited ${formatDateTime(t.editedAt)}`}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </div>

@@ -5,8 +5,16 @@ import {
   activities, contacts, opportunities, opportunityProperties, outreachStatuses, properties,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
-import { NotFoundError } from '@/lib/errors';
+import { NotFoundError, ValidationError } from '@/lib/errors';
 import { recordAudit } from './audit';
+
+/**
+ * Entries a person actually logged, as opposed to ones the system appended on
+ * their behalf ('status_change') or purely automated bookkeeping ('system').
+ * Editing or deleting the latter would let someone quietly rewrite what the
+ * timeline says actually happened, so both are restricted to these types.
+ */
+const EDITABLE_ACTIVITY_TYPES = new Set(['call', 'note', 'email', 'meeting']);
 
 /**
  * Logs a call or note and optionally applies the follow-up / status side effects
@@ -109,6 +117,57 @@ export async function logActivity(input: {
     }, tx as unknown as typeof db);
 
     return activity!;
+  });
+}
+
+/**
+ * Corrects a logged call/note - a typo, a wrong outcome, a date entered
+ * wrong. `editedAt` is stamped so the timeline can show it was corrected,
+ * without hiding what the original entry said (nothing here overwrites
+ * `createdAt` or `authorLabel` - the record still shows who actually logged it).
+ */
+export async function updateActivity(
+  id: string,
+  patch: Record<string, unknown>,
+  actor: Actor,
+) {
+  const [existing] = await db.select().from(activities).where(eq(activities.id, id)).limit(1);
+  if (!existing) throw new NotFoundError('Activity');
+  if (!EDITABLE_ACTIVITY_TYPES.has(existing.type)) {
+    throw new ValidationError('This entry was generated automatically and cannot be edited.');
+  }
+
+  const values: Record<string, unknown> = { ...patch };
+  if ('occurredAt' in patch) values.occurredAt = new Date(patch.occurredAt as string);
+
+  const [updated] = await db.update(activities)
+    .set({ ...values, editedAt: new Date(), updatedAt: new Date() })
+    .where(eq(activities.id, id))
+    .returning();
+
+  await recordAudit({
+    entityType: 'activity', entityId: id, action: 'update',
+    summary: `Edited a logged ${existing.type}`,
+    actor,
+  });
+
+  return updated!;
+}
+
+/** Removes a mis-logged entry entirely. Never touches status_change/system rows. */
+export async function deleteActivity(id: string, actor: Actor) {
+  const [existing] = await db.select().from(activities).where(eq(activities.id, id)).limit(1);
+  if (!existing) throw new NotFoundError('Activity');
+  if (!EDITABLE_ACTIVITY_TYPES.has(existing.type)) {
+    throw new ValidationError('This entry was generated automatically and cannot be deleted.');
+  }
+
+  await db.delete(activities).where(eq(activities.id, id));
+
+  await recordAudit({
+    entityType: 'activity', entityId: id, action: 'delete',
+    summary: `Deleted a logged ${existing.type}`,
+    actor,
   });
 }
 
