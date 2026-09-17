@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { asc, isNull } from 'drizzle-orm';
+import { asc } from 'drizzle-orm';
 import { ArrowLeft, Users as UsersIcon } from 'lucide-react';
 import { db } from '@/db';
 import { users } from '@/db/schema';
@@ -7,22 +7,30 @@ import { requirePageAdmin } from '@/lib/auth/guards';
 import { formatDateTime } from '@/lib/format';
 import { StatusChip, Value } from '@/components/ui/primitives';
 import { UserAdmin } from './user-admin';
+import { ShowArchivedToggle, UserActions } from './user-actions';
 
 export const metadata = { title: 'Users' };
 export const dynamic = 'force-dynamic';
 
-export default async function UsersPage() {
+export default async function UsersPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const actor = await requirePageAdmin('/settings/users');
+  const sp = await searchParams;
+  const includeArchived = sp.includeArchived === 'true';
 
-  const rows = await db
+  const all = await db
     .select({
       id: users.id, name: users.name, email: users.email, role: users.role,
       isActive: users.isActive, lastLoginAt: users.lastLoginAt, createdAt: users.createdAt,
-      hasPassword: users.passwordHash,
+      hasPassword: users.passwordHash, archivedAt: users.archivedAt,
     })
     .from(users)
-    .where(isNull(users.archivedAt))
     .orderBy(asc(users.name));
+
+  const rows = includeArchived ? all : all.filter((u) => !u.archivedAt);
 
   return (
     <>
@@ -48,7 +56,10 @@ export default async function UsersPage() {
           <section className="card">
             <div className="card-header">
               <h2 className="card-title">Accounts</h2>
-              <span className="text-[11px] text-ink-500">{rows.length}</span>
+              <div className="flex items-center gap-3">
+                <ShowArchivedToggle checked={includeArchived} />
+                <span className="text-[11px] text-ink-500">{rows.length}</span>
+              </div>
             </div>
             <table className="table-dense">
               <thead>
@@ -58,6 +69,7 @@ export default async function UsersPage() {
                   <th className="w-24">Role</th>
                   <th className="w-28">Status</th>
                   <th className="w-40">Last sign-in</th>
+                  <th className="w-64">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -75,7 +87,9 @@ export default async function UsersPage() {
                       />
                     </td>
                     <td className="text-xs">
-                      {!u.isActive ? (
+                      {u.archivedAt ? (
+                        <span className="text-ink-400">Archived</span>
+                      ) : !u.isActive ? (
                         <span className="text-red-700">Disabled</span>
                       ) : !u.hasPassword ? (
                         <span className="text-amber-700">No password set</span>
@@ -85,6 +99,12 @@ export default async function UsersPage() {
                     </td>
                     <td className="text-xs text-ink-600">
                       <Value>{u.lastLoginAt ? formatDateTime(u.lastLoginAt) : null}</Value>
+                    </td>
+                    <td>
+                      <UserActions
+                        user={{ id: u.id, name: u.name, email: u.email, role: u.role, isActive: u.isActive, archived: !!u.archivedAt }}
+                        isSelf={u.id === actor.id}
+                      />
                     </td>
                   </tr>
                 ))}

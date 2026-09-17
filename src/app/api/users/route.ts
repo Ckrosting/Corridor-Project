@@ -4,7 +4,7 @@ import { users } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/guards';
 import { ok, readJson, route } from '@/lib/api';
 import { userCreateSchema } from '@/lib/validation/schemas';
-import { hashPassword } from '@/auth';
+import { hashPassword } from '@/lib/auth/password';
 import { recordAudit } from '@/lib/services/audit';
 import { ValidationError } from '@/lib/errors';
 

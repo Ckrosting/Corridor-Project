@@ -1,10 +1,10 @@
 import NextAuth, { type DefaultSession } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import { eq, sql as raw } from 'drizzle-orm';
-import bcrypt from 'bcryptjs';
 import { db } from '@/db';
 import { users } from '@/db/schema';
 import { env } from '@/lib/env';
+import { verifyPassword } from '@/lib/auth/password';
 
 declare module 'next-auth' {
   interface Session {
@@ -13,15 +13,6 @@ declare module 'next-auth' {
 }
 
 export type AppRole = 'admin' | 'member';
-
-/**
- * Cost 12 is the practical sweet spot: ~250ms per hash on modern hardware, which
- * is a meaningful brute-force cost while staying invisible on a login form.
- */
-export const BCRYPT_COST = 12;
-
-export const hashPassword = (plain: string) => bcrypt.hash(plain, BCRYPT_COST);
-export const verifyPassword = (plain: string, hash: string) => bcrypt.compare(plain, hash);
 
 /** Looks a user up case-insensitively and rejects inactive or archived accounts. */
 async function findLoginableUser(email: string) {
