@@ -298,6 +298,7 @@ export function MarketWorkspace({
     title: propertyTitle(p),
     statusColor: p.outreachStatusColor,
     statusLabel: p.outreachStatusLabel,
+    listingStatus: p.listingStatus,
     needsParcelOutline: p.needsParcelOutline,
     isSample: p.isSample,
   })), [visible]);

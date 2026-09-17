@@ -15,6 +15,7 @@ export interface MapProperty {
   title: string;
   statusColor: string | null;
   statusLabel: string | null;
+  listingStatus: string;
   needsParcelOutline: boolean;
   isSample: boolean;
 }
@@ -403,7 +404,10 @@ export function MapView({
       seen.add(property.id);
 
       const isSelected = property.id === selectedPropertyId;
-      const color = property.statusColor ?? '#64748b';
+      // Listed-for-sale is a stronger, less overridable signal than the
+      // (configurable, per-user) outreach status color, so it wins on the map
+      // regardless of where the property sits in outreach.
+      const color = property.listingStatus === 'for_sale' ? '#dc2626' : property.statusColor ?? '#64748b';
       const classes = [
         'hc-marker',
         isSelected ? 'hc-marker-selected' : '',
