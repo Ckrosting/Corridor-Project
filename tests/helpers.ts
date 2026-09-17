@@ -3,7 +3,7 @@ import { eq, inArray, like } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   contacts, markets, opportunities, outreachStatuses, properties,
-  transactionStages, users,
+  tags, transactionStages, users,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
 import type { AreaGeometry } from '@/lib/geo/types';
@@ -43,6 +43,13 @@ export async function statusByKey(key: string) {
   const [row] = await db.select().from(outreachStatuses).where(eq(outreachStatuses.key, key)).limit(1);
   if (!row) throw new Error(`Outreach status "${key}" not found. Run \`npm run db:seed\`.`);
   return row;
+}
+
+/** A second, disposable account distinct from the actor performing an action - for self-lockout and role-change tests. */
+export async function createTestUser(name = 'Target', role: 'admin' | 'member' = 'member') {
+  const email = `${TEST_PREFIX.toLowerCase()}-${name.toLowerCase().replace(/\W+/g, '-')}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@example.invalid`;
+  const [user] = await db.insert(users).values({ email, name: `${TEST_PREFIX} ${name}`, role, passwordHash: null }).returning();
+  return user!;
 }
 
 export async function stageByKey(key: string) {
@@ -104,4 +111,7 @@ export async function cleanupTestData() {
   // its property_contacts link, never the contact itself - so they need their
   // own cleanup rather than falling out of the market cascade above.
   await db.delete(contacts).where(like(contacts.name, `${TEST_PREFIX}%`));
+
+  // Tags are a shared global vocabulary, not market-scoped, same reasoning as contacts above.
+  await db.delete(tags).where(like(tags.name, `${TEST_PREFIX}%`));
 }

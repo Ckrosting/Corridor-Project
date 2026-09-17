@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LOST_REASON_VALUES } from '@/lib/lost-reasons';
 
 /**
  * Server-side validation for every write. These schemas are the single source of
@@ -174,6 +175,30 @@ export const propertyUpdateSchema = propertyFieldsSchema.partial().extend({
   customFields: z.record(z.string(), z.unknown()).optional(),
 });
 
+/**
+ * Bulk edits are a discriminated union so each action carries exactly its own
+ * parameters - a request cannot ask to set a status while supplying tag ids.
+ * The id cap is enforced here as well as in the service so an oversized batch is
+ * rejected before any database work starts.
+ */
+export const propertyBulkSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('set_status'),
+    propertyIds: z.array(uuid).min(1).max(500, 'Bulk actions handle up to 500 properties at a time.'),
+    outreachStatusId: uuid,
+  }),
+  z.object({
+    action: z.literal('set_follow_up'),
+    propertyIds: z.array(uuid).min(1).max(500, 'Bulk actions handle up to 500 properties at a time.'),
+    nextFollowUpDate: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a date.'), z.null()]),
+  }),
+  z.object({
+    action: z.literal('add_tags'),
+    propertyIds: z.array(uuid).min(1).max(500, 'Bulk actions handle up to 500 properties at a time.'),
+    tagIds: z.array(uuid).min(1).max(50),
+  }),
+]);
+
 /* -------------------------------------------------------------------------- */
 /* Parcels                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -312,6 +337,8 @@ export const opportunityUpdateSchema = z.object({
   name: trimmed(240).optional(),
   stageId: uuid.optional(),
   stageChangeNote: optionalText(2000),
+  lostReason: z.enum(LOST_REASON_VALUES).nullish(),
+  lostReasonNote: optionalText(1000),
   targetPrice: optionalDecimal({ min: 0 }),
   offerPrice: optionalDecimal({ min: 0 }),
   contractPrice: optionalDecimal({ min: 0 }),
@@ -377,6 +404,11 @@ export const userUpdateSchema = z.object({
   role: z.enum(['admin', 'member']).optional(),
   isActive: z.boolean().optional(),
   password: z.string().min(12, 'Password must be at least 12 characters.').max(200).optional(),
+});
+
+/** An admin setting another account's password; no current password to confirm. */
+export const adminPasswordResetSchema = z.object({
+  newPassword: z.string().min(12, 'New password must be at least 12 characters.').max(200),
 });
 
 export const changePasswordSchema = z.object({
