@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { asc, isNull, sql as raw } from 'drizzle-orm';
 import {
-  Bot, Database, Download, Map, Palette, ShieldCheck, Tags, Users,
+  Bot, Database, Download, Map, Palette, ScrollText, ShieldCheck, Tags, Users,
 } from 'lucide-react';
 import { db } from '@/db';
 import { outreachStatuses, transactionStages, users } from '@/db/schema';
@@ -123,6 +123,12 @@ export default async function SettingsPage() {
               title="Map providers"
               body={`Geocoding via ${config.geocoder.provider}. Satellite imagery ${process.env.NEXT_PUBLIC_SATELLITE_PROVIDER ? 'configured' : 'not configured'}.`}
               adminOnly={false}
+            />
+            <SettingsCard
+              href="/settings/audit" icon={<ScrollText size={16} />}
+              title="Audit log"
+              body="Every create, update, archive and restore this app has recorded, with who and when."
+              adminOnly={!isAdmin}
             />
           </div>
 
