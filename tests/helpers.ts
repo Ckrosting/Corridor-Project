@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { eq, inArray, like } from 'drizzle-orm';
 import { db } from '@/db';
 import {
-  markets, opportunities, outreachStatuses, properties,
+  contacts, markets, opportunities, outreachStatuses, properties,
   transactionStages, users,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
@@ -99,4 +99,9 @@ export async function cleanupTestData() {
   }
 
   await db.delete(users).where(like(users.email, `${TEST_PREFIX.toLowerCase()}-%`));
+
+  // Contacts are not scoped to a market - deleting a test property only removes
+  // its property_contacts link, never the contact itself - so they need their
+  // own cleanup rather than falling out of the market cascade above.
+  await db.delete(contacts).where(like(contacts.name, `${TEST_PREFIX}%`));
 }

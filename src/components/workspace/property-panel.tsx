@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  Camera, Check, Copy, ExternalLink, Mail, MapPin, Phone, Squircle, Trash2, TrendingUp, X,
+  Camera, Check, Copy, ExternalLink, Mail, MapPin, Pencil, Phone, Plus, Squircle, Trash2, TrendingUp, X,
 } from 'lucide-react';
 import {
   ACTIVITY_TYPE_LABELS, CALL_OUTCOME_LABELS, CONTACT_ROLE_LABELS, LISTING_STATUS_LABELS,
@@ -55,9 +55,14 @@ interface PropertyDetailData {
   ownerEntity: { id: string; name: string; entityType: string | null; mailingAddress: string | null } | null;
   parcels: Array<{ id: string; parcelIdText: string | null; label: string | null; acreage: string | null; geometry: unknown }>;
   contacts: Array<{
-    contact: { id: string; name: string; company: string | null; phone: string | null; email: string | null; notes: string | null; verifiedAt: string | null; source: string | null };
+    contact: {
+      id: string; version: number; name: string; company: string | null; title: string | null;
+      phone: string | null; phoneAlt: string | null; email: string | null; notes: string | null;
+      verifiedAt: string | null; source: string | null;
+    };
     relationship: string;
     isPrimary: boolean;
+    linkNotes: string | null;
   }>;
   tags: Array<{ id: string; name: string; color: string }>;
   timeline: Array<{
@@ -74,6 +79,26 @@ interface PropertyDetailData {
 }
 
 type Tab = 'overview' | 'calls' | 'contacts' | 'financial' | 'parcels';
+
+interface ContactForm {
+  name: string;
+  company: string;
+  title: string;
+  phone: string;
+  phoneAlt: string;
+  email: string;
+  notes: string;
+  relationship: string;
+  isPrimary: boolean;
+}
+
+const emptyContactForm = (): ContactForm => ({
+  name: '', company: '', title: '', phone: '', phoneAlt: '', email: '', notes: '',
+  relationship: 'other', isPrimary: false,
+});
+
+/** Empty string means "not set", never the literal value - matches the pattern in property-editor.tsx. */
+const blank = (v: string): string | null => (v.trim() === '' ? null : v.trim());
 
 /**
  * The property side panel.
@@ -102,6 +127,12 @@ export function PropertyPanel({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [addingContact, setAddingContact] = useState(false);
+  const [editingContactKey, setEditingContactKey] = useState<string | null>(null);
+  const [contactForm, setContactForm] = useState(emptyContactForm());
+  const [contactBusy, setContactBusy] = useState(false);
+  const [contactError, setContactError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,6 +175,121 @@ export function PropertyPanel({
     } catch {
       setError('Could not copy to the clipboard.');
     }
+  }
+
+  async function addContact() {
+    if (!contactForm.name.trim()) { setContactError('A name is required.'); return; }
+    setContactBusy(true);
+    setContactError(null);
+    try {
+      const res = await fetch(`/api/properties/${propertyId}/contacts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          newContact: {
+            name: contactForm.name.trim(),
+            company: blank(contactForm.company),
+            title: blank(contactForm.title),
+            phone: blank(contactForm.phone),
+            phoneAlt: blank(contactForm.phoneAlt),
+            email: blank(contactForm.email),
+            notes: blank(contactForm.notes),
+          },
+          relationship: contactForm.relationship,
+          isPrimary: contactForm.isPrimary,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not add this contact.');
+      setAddingContact(false);
+      setContactForm(emptyContactForm());
+      void load();
+      onChanged();
+    } catch (err) {
+      setContactError(err instanceof Error ? err.message : 'Could not add this contact.');
+    } finally {
+      setContactBusy(false);
+    }
+  }
+
+  async function saveContactEdit(current: PropertyDetailData['contacts'][number]) {
+    setContactBusy(true);
+    setContactError(null);
+    try {
+      // The person's own details (name, phone, email, ...) are shared across
+      // every property they are linked to, so they are one write to the
+      // contact record. Their relationship to THIS property - and whether they
+      // are its primary contact - is a separate write to the link.
+      const contactRes = await fetch(`/api/contacts/${current.contact.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          version: current.contact.version,
+          name: contactForm.name.trim(),
+          company: blank(contactForm.company),
+          title: blank(contactForm.title),
+          phone: blank(contactForm.phone),
+          phoneAlt: blank(contactForm.phoneAlt),
+          email: blank(contactForm.email),
+          notes: blank(contactForm.notes),
+        }),
+      });
+      const contactBody = (await contactRes.json().catch(() => ({}))) as { error?: string };
+      if (!contactRes.ok) throw new Error(contactBody.error ?? 'Could not save this contact.');
+
+      const linkRes = await fetch(
+        `/api/properties/${propertyId}/contacts/${current.contact.id}?relationship=${current.relationship}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relationship: contactForm.relationship, isPrimary: contactForm.isPrimary }),
+        },
+      );
+      const linkBody = (await linkRes.json().catch(() => ({}))) as { error?: string };
+      if (!linkRes.ok) throw new Error(linkBody.error ?? 'Could not save this contact\'s role on this property.');
+
+      setEditingContactKey(null);
+      void load();
+      onChanged();
+    } catch (err) {
+      setContactError(err instanceof Error ? err.message : 'Could not save this contact.');
+    } finally {
+      setContactBusy(false);
+    }
+  }
+
+  async function removeContact(contactId: string, relationship: string) {
+    setContactBusy(true);
+    setContactError(null);
+    try {
+      const res = await fetch(`/api/properties/${propertyId}/contacts/${contactId}?relationship=${relationship}`, {
+        method: 'DELETE',
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not remove this contact.');
+      void load();
+      onChanged();
+    } catch (err) {
+      setContactError(err instanceof Error ? err.message : 'Could not remove this contact.');
+    } finally {
+      setContactBusy(false);
+    }
+  }
+
+  function startEditingContact(current: PropertyDetailData['contacts'][number]) {
+    setContactError(null);
+    setContactForm({
+      name: current.contact.name,
+      company: current.contact.company ?? '',
+      title: current.contact.title ?? '',
+      phone: current.contact.phone ?? '',
+      phoneAlt: current.contact.phoneAlt ?? '',
+      email: current.contact.email ?? '',
+      notes: current.contact.notes ?? '',
+      relationship: current.relationship,
+      isPrimary: current.isPrimary,
+    });
+    setEditingContactKey(`${current.contact.id}-${current.relationship}`);
   }
 
   if (loading && !data) {
@@ -384,14 +530,33 @@ export function PropertyPanel({
               </div>
             )}
 
-            {data.contacts.length === 0 ? (
+            {contactError && <div className="banner-error" role="alert">{contactError}</div>}
+
+            {data.contacts.length === 0 && !addingContact && (
               <EmptyState
                 title="No contacts yet"
                 body="Add the owner, broker or representative so their number is one click away when you call."
               />
-            ) : (
-              data.contacts.map(({ contact, relationship, isPrimary }) => (
-                <div key={`${contact.id}-${relationship}`} className="rounded-md border border-ink-200 p-2.5">
+            )}
+
+            {data.contacts.map((link) => {
+              const { contact, relationship, isPrimary } = link;
+              const key = `${contact.id}-${relationship}`;
+              if (editingContactKey === key) {
+                return (
+                  <ContactFormCard
+                    key={key}
+                    form={contactForm}
+                    setForm={setContactForm}
+                    busy={contactBusy}
+                    onCancel={() => setEditingContactKey(null)}
+                    onSave={() => void saveContactEdit(link)}
+                    saveLabel="Save contact"
+                  />
+                );
+              }
+              return (
+                <div key={key} className="rounded-md border border-ink-200 p-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-ink-900">{contact.name}</div>
@@ -400,6 +565,19 @@ export function PropertyPanel({
                     <div className="flex shrink-0 items-center gap-1">
                       {isPrimary && <span className="chip border-accent-200 bg-accent-50 text-accent-700">Primary</span>}
                       <StatusChip label={CONTACT_ROLE_LABELS[relationship] ?? relationship} />
+                      <button
+                        type="button" className="btn-ghost btn-sm" title="Edit this contact"
+                        onClick={() => startEditingContact(link)}
+                      >
+                        <Pencil size={12} />
+                      </button>
+                      <button
+                        type="button" className="btn-ghost btn-sm text-red-600 hover:bg-red-50" title="Remove from this property"
+                        onClick={() => void removeContact(contact.id, relationship)}
+                        disabled={contactBusy}
+                      >
+                        <Trash2 size={12} />
+                      </button>
                     </div>
                   </div>
 
@@ -453,7 +631,25 @@ export function PropertyPanel({
                     {contact.verifiedAt ? ` · verified ${formatDate(contact.verifiedAt)}` : ' · not verified'}
                   </div>
                 </div>
-              ))
+              );
+            })}
+
+            {addingContact ? (
+              <ContactFormCard
+                form={contactForm}
+                setForm={setContactForm}
+                busy={contactBusy}
+                onCancel={() => { setAddingContact(false); setContactForm(emptyContactForm()); setContactError(null); }}
+                onSave={() => void addContact()}
+                saveLabel="Add contact"
+              />
+            ) : (
+              <button
+                type="button" className="btn-secondary w-full btn-sm"
+                onClick={() => { setContactForm(emptyContactForm()); setContactError(null); setAddingContact(true); }}
+              >
+                <Plus size={13} /> Add contact
+              </button>
             )}
           </div>
         )}
@@ -563,6 +759,49 @@ export function PropertyPanel({
         />
       )}
     </PanelShell>
+  );
+}
+
+/** The same small form for adding a new contact or editing an existing one. */
+function ContactFormCard({
+  form, setForm, busy, onCancel, onSave, saveLabel,
+}: {
+  form: ContactForm;
+  setForm: React.Dispatch<React.SetStateAction<ContactForm>>;
+  busy: boolean;
+  onCancel(): void;
+  onSave(): void;
+  saveLabel: string;
+}) {
+  const set = <K extends keyof ContactForm>(key: K) => (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
+  ) => setForm((f) => ({ ...f, [key]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value }));
+
+  return (
+    <div className="space-y-2 rounded-md border border-accent-300 bg-accent-50/40 p-2.5">
+      <div className="grid grid-cols-2 gap-2">
+        <input className="input" placeholder="Name *" value={form.name} onChange={set('name')} />
+        <input className="input" placeholder="Company" value={form.company} onChange={set('company')} />
+        <input className="input" placeholder="Title" value={form.title} onChange={set('title')} />
+        <select className="input" value={form.relationship} onChange={set('relationship')}>
+          {Object.entries(CONTACT_ROLE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <input className="input" placeholder="Phone" value={form.phone} onChange={set('phone')} />
+        <input className="input" placeholder="Alternate phone" value={form.phoneAlt} onChange={set('phoneAlt')} />
+        <input className="input" placeholder="Email" value={form.email} onChange={set('email')} />
+        <label className="flex items-center gap-1.5 text-xs text-ink-600">
+          <input type="checkbox" checked={form.isPrimary} onChange={set('isPrimary')} />
+          Primary contact for this property
+        </label>
+      </div>
+      <textarea className="input" rows={2} placeholder="Notes" value={form.notes} onChange={set('notes')} />
+      <div className="flex justify-end gap-2">
+        <button type="button" className="btn-ghost btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="button" className="btn-primary btn-sm" onClick={onSave} disabled={busy}>
+          {busy && <Spinner />} {saveLabel}
+        </button>
+      </div>
+    </div>
   );
 }
 

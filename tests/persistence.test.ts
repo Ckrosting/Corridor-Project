@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import {
-  activities, opportunities, opportunityProperties, properties,
-  propertyParcels,
+  activities, contacts, opportunities, opportunityProperties, properties,
+  propertyContacts, propertyParcels,
 } from '@/db/schema';
 import {
   createParcel, createProperty, getPropertyDetail, updateParcel, updateProperty,
@@ -11,13 +11,17 @@ import {
 import {
   changeOutreachStatus, getContactedButNotPromoted, getFollowUps, logActivity, setFollowUp,
 } from '@/lib/services/activities';
+import {
+  createContact, linkContactToProperty, unlinkContactFromProperty,
+  updateContact, updatePropertyContactLink,
+} from '@/lib/services/contacts';
 import { promoteToOpportunity, setOpportunityState } from '@/lib/services/opportunities';
 import { ConflictError } from '@/lib/errors';
 import { areaAcres, pointInGeometry } from '@/lib/geo/polygon';
 import type { Actor } from '@/lib/auth/guards';
 import {
   cleanupTestData, createTestMarket, ensureBaseline,
-  squareAround, stageByKey, statusByKey, testActor,
+  squareAround, stageByKey, statusByKey, TEST_PREFIX, testActor,
 } from './helpers';
 
 /**
@@ -398,5 +402,109 @@ describe('unknown values are never stored as zero', () => {
     expect(Number(row!.occupancyPercent)).toBe(0);
     // Distinguishable from unknown, which stays NULL.
     expect(row!.askingPrice).toBeNull();
+  });
+});
+
+/* ========================================================================== */
+/* Contacts                                                                   */
+/* ========================================================================== */
+
+describe('contacts', () => {
+  it('creates a new contact inline while linking it to a property', async () => {
+    const market = await createTestMarket('ContactNew');
+    const property = await createProperty({ marketId: market.id, name: 'Contact test' }, actor);
+
+    const contact = await linkContactToProperty({
+      propertyId: property.id,
+      newContact: { name: `${TEST_PREFIX} Broker One`, phone: '555-0100', email: 'broker1@example.invalid' },
+      relationship: 'broker',
+      isPrimary: true,
+      actor,
+    });
+
+    const [link] = await db.select().from(propertyContacts).where(
+      and(eq(propertyContacts.propertyId, property.id), eq(propertyContacts.contactId, contact.id)),
+    );
+    expect(link!.relationship).toBe('broker');
+    expect(link!.isPrimary).toBe(true);
+    expect(contact.phone).toBe('555-0100');
+  });
+
+  it('links the SAME existing contact to a second property, sharing their details', async () => {
+    const market = await createTestMarket('ContactShared');
+    const propertyA = await createProperty({ marketId: market.id, name: 'A' }, actor);
+    const propertyB = await createProperty({ marketId: market.id, name: 'B' }, actor);
+
+    const contact = await createContact({ name: `${TEST_PREFIX} Shared Broker`, phone: '555-0200' }, actor);
+    await linkContactToProperty({ propertyId: propertyA.id, contactId: contact.id, relationship: 'broker', isPrimary: true, actor });
+    await linkContactToProperty({ propertyId: propertyB.id, contactId: contact.id, relationship: 'broker', isPrimary: false, actor });
+
+    // Editing the shared contact's phone changes it everywhere they are linked -
+    // there is only ever one copy of a person's own details.
+    await updateContact(contact.id, { version: 1, phone: '555-0201' }, actor);
+    const [reloaded] = await db.select().from(properties).where(eq(properties.id, propertyA.id));
+    void reloaded; // property itself is untouched; the assertion below is what matters
+    const detail = await getPropertyDetail(propertyB.id);
+    expect(detail.contacts[0]!.contact.phone).toBe('555-0201');
+  });
+
+  it('re-linking the same contact under the same relationship updates the link instead of erroring', async () => {
+    const market = await createTestMarket('ContactRelink');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const contact = await createContact({ name: `${TEST_PREFIX} Relink` }, actor);
+
+    await linkContactToProperty({ propertyId: property.id, contactId: contact.id, relationship: 'owner', isPrimary: false, actor });
+    await linkContactToProperty({ propertyId: property.id, contactId: contact.id, relationship: 'owner', isPrimary: true, notes: 'now primary', actor });
+
+    const links = await db.select().from(propertyContacts).where(
+      and(eq(propertyContacts.propertyId, property.id), eq(propertyContacts.contactId, contact.id)),
+    );
+    expect(links).toHaveLength(1);
+    expect(links[0]!.isPrimary).toBe(true);
+    expect(links[0]!.notes).toBe('now primary');
+  });
+
+  it('changes a relationship by moving the link, not editing a column that is part of the key', async () => {
+    const market = await createTestMarket('ContactRel');
+    const property = await createProperty({ marketId: market.id }, actor);
+    const contact = await createContact({ name: `${TEST_PREFIX} RoleChange` }, actor);
+    await linkContactToProperty({ propertyId: property.id, contactId: contact.id, relationship: 'tenant', isPrimary: false, actor });
+
+    await updatePropertyContactLink({
+      propertyId: property.id, contactId: contact.id, currentRelationship: 'tenant',
+      relationship: 'owner', actor,
+    });
+
+    const links = await db.select().from(propertyContacts).where(
+      and(eq(propertyContacts.propertyId, property.id), eq(propertyContacts.contactId, contact.id)),
+    );
+    expect(links).toHaveLength(1);
+    expect(links[0]!.relationship).toBe('owner');
+  });
+
+  it('unlinks a contact from one property without touching the contact record or their other links', async () => {
+    const market = await createTestMarket('ContactUnlink');
+    const propertyA = await createProperty({ marketId: market.id }, actor);
+    const propertyB = await createProperty({ marketId: market.id }, actor);
+    const contact = await createContact({ name: `${TEST_PREFIX} Unlink Me` }, actor);
+    await linkContactToProperty({ propertyId: propertyA.id, contactId: contact.id, relationship: 'broker', isPrimary: false, actor });
+    await linkContactToProperty({ propertyId: propertyB.id, contactId: contact.id, relationship: 'broker', isPrimary: false, actor });
+
+    await unlinkContactFromProperty({ propertyId: propertyA.id, contactId: contact.id, relationship: 'broker', actor });
+
+    const remaining = await db.select().from(propertyContacts).where(eq(propertyContacts.contactId, contact.id));
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]!.propertyId).toBe(propertyB.id);
+
+    const [stillExists] = await db.select().from(contacts).where(eq(contacts.id, contact.id));
+    expect(stillExists).toBeTruthy();
+  });
+
+  it('bumps the contact version on update and rejects a stale write', async () => {
+    const contact = await createContact({ name: `${TEST_PREFIX} Versioned` }, actor);
+    const updated = await updateContact(contact.id, { version: 1, phone: '555-0300' }, actor);
+    expect(updated.version).toBe(2);
+
+    await expect(updateContact(contact.id, { version: 1, phone: '555-0301' }, actor)).rejects.toThrow(ConflictError);
   });
 });

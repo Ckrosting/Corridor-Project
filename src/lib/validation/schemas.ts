@@ -233,6 +233,23 @@ export const propertyContactLinkSchema = z.object({
   notes: optionalText(2000),
 });
 
+/** Attaches a contact to a property - an existing one by id, or a new one inline. */
+export const propertyContactAttachSchema = z.object({
+  contactId: uuid.optional(),
+  newContact: contactCreateSchema.omit({ ownerEntityId: true }).optional(),
+  relationship: contactRole.default('other'),
+  isPrimary: z.boolean().default(false),
+  notes: optionalText(2000),
+}).refine((v) => Boolean(v.contactId ?? v.newContact), {
+  message: 'Provide either an existing contact or details for a new one.',
+});
+
+export const propertyContactLinkUpdateSchema = z.object({
+  relationship: contactRole.optional(),
+  isPrimary: z.boolean().optional(),
+  notes: optionalText(2000),
+});
+
 /* -------------------------------------------------------------------------- */
 /* Activities and calls                                                       */
 /* -------------------------------------------------------------------------- */
