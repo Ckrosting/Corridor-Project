@@ -392,6 +392,18 @@ export const customFieldDefSchema = z.object({
   path: ['options'],
 });
 
+export const tagCreateSchema = z.object({
+  name: trimmed(60).min(1, 'Tag name is required.'),
+  color: hexColor,
+});
+
+export const tagUpdateSchema = z.object({
+  name: trimmed(60).min(1, 'Tag name is required.').optional(),
+  color: hexColor.optional(),
+}).refine((v) => v.name !== undefined || v.color !== undefined, {
+  message: 'Nothing to change.',
+});
+
 export const userCreateSchema = z.object({
   email: z.string().trim().email('Must be a valid email address.').max(240),
   name: trimmed(160).min(1, 'Name is required.'),
