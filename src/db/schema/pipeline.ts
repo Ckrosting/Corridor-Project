@@ -80,6 +80,13 @@ export const opportunities = pgTable(
     removedAt: timestamp('removed_at', { withTimezone: true }),
     removedReason: text('removed_reason'),
 
+    /**
+     * Why the deal was lost, from the fixed list in `@/lib/lost-reasons`. Distinct
+     * from `removedReason`, which only explains why a row left the active board.
+     */
+    lostReason: text('lost_reason'),
+    lostReasonNote: text('lost_reason_note'),
+
     isSample: boolean('is_sample').notNull().default(false),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),

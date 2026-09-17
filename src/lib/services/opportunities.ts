@@ -8,6 +8,7 @@ import {
 import type { Actor } from '@/lib/auth/guards';
 import { sqlIn } from '@/lib/db-helpers';
 import { NotFoundError, ValidationError } from '@/lib/errors';
+import { LOST_REASON_VALUES, lostReasonLabel, type LostReason } from '@/lib/lost-reasons';
 import { propertyTitle } from '@/lib/format';
 import { recordAudit, updateWithVersion } from './audit';
 
@@ -158,6 +159,7 @@ export async function listOpportunities(f: OpportunityFilters = {}) {
       offerPrice: opportunities.offerPrice,
       contractPrice: opportunities.contractPrice,
       expectedCloseDate: opportunities.expectedCloseDate,
+      lostReason: opportunities.lostReason,
       nextStep: opportunities.nextStep,
       nextStepDate: opportunities.nextStepDate,
       promotedAt: opportunities.promotedAt,
@@ -217,11 +219,23 @@ export async function getOpportunityDetail(id: string) {
 /* Writes                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/** The lost reason belongs in the timeline entry too, not only on the row it closed. */
+function stageHistoryNote(note: string | null, lostReason: string | null, lostReasonNote: string | null) {
+  const parts = [
+    lostReason ? `Lost — ${lostReasonLabel(lostReason) ?? lostReason}` : null,
+    lostReasonNote,
+    note,
+  ].filter(Boolean);
+  return parts.length ? parts.join('. ') : null;
+}
+
 export async function updateOpportunity(id: string, input: {
   version: number;
   name?: string;
   stageId?: string;
   stageChangeNote?: string | null;
+  lostReason?: string | null;
+  lostReasonNote?: string | null;
   targetPrice?: string | null;
   offerPrice?: string | null;
   contractPrice?: string | null;
@@ -246,6 +260,18 @@ export async function updateOpportunity(id: string, input: {
     if (!toStage) throw new NotFoundError('Transaction stage');
     values.stageId = input.stageId;
     values.closedAt = toStage.category === 'closed_won' ? new Date() : null;
+
+    if (toStage.category === 'closed_lost') {
+      if (!input.lostReason || !LOST_REASON_VALUES.includes(input.lostReason as LostReason)) {
+        throw new ValidationError('Losing a deal needs a reason, so lost deals can be compared later.');
+      }
+      values.lostReason = input.lostReason;
+      values.lostReasonNote = input.lostReasonNote ?? null;
+    } else {
+      // A reopened deal is no longer lost; keeping the old reason would misreport it.
+      values.lostReason = null;
+      values.lostReasonNote = null;
+    }
   }
 
   const updated = await updateWithVersion<typeof opportunities.$inferSelect>({
@@ -258,7 +284,7 @@ export async function updateOpportunity(id: string, input: {
       opportunityId: id,
       fromStageId: before.stageId, toStageId: input.stageId!,
       fromStageLabel: fromStage?.label ?? null, toStageLabel: toStage!.label,
-      note: input.stageChangeNote ?? null,
+      note: stageHistoryNote(input.stageChangeNote ?? null, values.lostReason as string | null, input.lostReasonNote ?? null),
       changedBy: actor.id, changedByLabel: actor.name,
     });
     await recordAudit({
