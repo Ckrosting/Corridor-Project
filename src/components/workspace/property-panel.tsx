@@ -50,6 +50,7 @@ interface PropertyDetailData {
   nextFollowUpDate: string | null;
   researchNotes: string | null;
   needsParcelOutline: boolean;
+  needsMapPlacement: boolean;
   isSample: boolean;
   version: number;
   outreachStatus: { id: string; label: string; color: string } | null;
@@ -132,7 +133,7 @@ function toLocalInputValue(iso: string): string {
  * does not lose their place while working a market.
  */
 export function PropertyPanel({
-  propertyId, statuses, tags, propertyTypes, isAdmin, onClose, onChanged, onZoomToProperty,
+  propertyId, statuses, tags, propertyTypes, isAdmin, onClose, onChanged, onZoomToProperty, onPlaceOnMap,
 }: {
   propertyId: string;
   statuses: OutreachStatusOption[];
@@ -142,6 +143,7 @@ export function PropertyPanel({
   onClose(): void;
   onChanged(): void;
   onZoomToProperty(): void;
+  onPlaceOnMap(): void;
 }) {
   const [data, setData] = useState<PropertyDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -437,14 +439,23 @@ export function PropertyPanel({
           {data.needsParcelOutline && (
             <span className="chip border-amber-300 bg-amber-50 text-amber-800">Needs parcel outline</span>
           )}
+          {data.needsMapPlacement && (
+            <span className="chip border-amber-300 bg-amber-50 text-amber-800">Needs map placement</span>
+          )}
           {data.tags.map((t) => <StatusChip key={t.id} label={t.name} color={t.color} />)}
         </div>
       }
       actions={
         <div className="flex items-center gap-1">
-          <button type="button" className="btn-ghost btn-sm" onClick={onZoomToProperty} title="Zoom the map to this property">
-            <MapPin size={13} /> Zoom
-          </button>
+          {data.needsMapPlacement ? (
+            <button type="button" className="btn-primary btn-sm" onClick={onPlaceOnMap} title="Click the map to set this property's location">
+              <MapPin size={13} /> Place on map
+            </button>
+          ) : (
+            <button type="button" className="btn-ghost btn-sm" onClick={onZoomToProperty} title="Zoom the map to this property">
+              <MapPin size={13} /> Zoom
+            </button>
+          )}
           {data.latitude != null && data.longitude != null && (
             <a
               href={streetViewUrl(data.latitude, data.longitude)}

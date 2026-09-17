@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Filter, MapPin, Pencil, Plus, RotateCcw, Search, Squircle, Target, Trash2, X,
 } from 'lucide-react';
@@ -33,6 +33,7 @@ export interface WorkspaceProperty {
   landAcreage: string | null;
   nextFollowUpDate: string | null;
   needsParcelOutline: boolean;
+  needsMapPlacement: boolean;
   isSample: boolean;
   outreachStatusId: string | null;
   outreachStatusLabel: string | null;
@@ -86,11 +87,13 @@ export function MarketWorkspace({
   market, anchors, statuses, tags, propertyTypes, properties, parcels, aiConfigured, isAdmin,
 }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const mapRef = useRef<MapViewHandle>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawMode, setDrawMode] = useState<DrawMode>('none');
   const [pendingParcelFor, setPendingParcelFor] = useState<string | null>(null);
+  const [pendingPlacementFor, setPendingPlacementFor] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [addingAnchor, setAddingAnchor] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -392,6 +395,37 @@ export function MarketWorkspace({
     }
   }, [properties, router]);
 
+  const startPlacingProperty = useCallback((propertyId: string) => {
+    setSelectedId(propertyId);
+    setPendingPlacementFor(propertyId);
+    setDrawMode('point');
+  }, []);
+
+  const cancelPlacement = useCallback(() => {
+    setPendingPlacementFor(null);
+    setDrawMode('none');
+  }, []);
+
+  const handlePointPlaced = useCallback((point: LatLng) => {
+    if (!pendingPlacementFor) return;
+    const target = pendingPlacementFor;
+    setPendingPlacementFor(null);
+    setDrawMode('none');
+    void handlePropertyMoved(target, point, []);
+  }, [pendingPlacementFor, handlePropertyMoved]);
+
+  // A property detail page can deep-link here (?place=<id>) to jump straight
+  // into placement mode for a property that needs coordinates, rather than
+  // making the user find it again in this market's list.
+  useEffect(() => {
+    const placeId = searchParams.get('place');
+    if (placeId && properties.some((p) => p.id === placeId)) {
+      startPlacingProperty(placeId);
+      router.replace(`/markets/${market.id}`, { scroll: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   /* ------------------------------------------------------------------ Render */
 
   const mapProperties = useMemo(() => visible.map((p) => ({
@@ -413,6 +447,10 @@ export function MarketWorkspace({
   const unplacedAnchors = useMemo(
     () => anchors.filter((a) => a.needsMapPlacement || a.latitude == null),
     [anchors],
+  );
+  const unplacedProperties = useMemo(
+    () => visible.filter((p) => p.needsMapPlacement || p.latitude == null || p.longitude == null),
+    [visible],
   );
 
   // Nothing in a market is a boundary any more, so the first fit is a point:
@@ -624,6 +662,7 @@ export function MarketWorkspace({
               onShapeDrawn={handleShapeDrawn}
               onParcelEdited={(id, geometry) => void handleParcelEdited(id, geometry)}
               onPropertyMoved={(id, point, staleParcelIds) => void handlePropertyMoved(id, point, staleParcelIds)}
+              onPointPlaced={handlePointPlaced}
             />
           )}
 
@@ -631,6 +670,19 @@ export function MarketWorkspace({
             <div className="pointer-events-none absolute top-2 left-1/2 z-[600] -translate-x-1/2">
               <div className="banner-info pointer-events-auto shadow-md">
                 <span>Click to outline the parcel. Double-click to finish.</span>
+              </div>
+            </div>
+          )}
+
+          {drawMode === 'point' && pendingPlacementFor && (
+            <div className="pointer-events-none absolute top-2 left-1/2 z-[600] -translate-x-1/2">
+              <div className="banner-info pointer-events-auto flex items-center gap-2 shadow-md">
+                <span>
+                  Click the map to place &ldquo;
+                  {propertyTitle(properties.find((p) => p.id === pendingPlacementFor) ?? { name: null, addressLine1: null, city: null })}
+                  &rdquo;.
+                </span>
+                <button type="button" className="btn-ghost btn-sm" onClick={cancelPlacement}>Cancel</button>
               </div>
             </div>
           )}
@@ -764,6 +816,36 @@ export function MarketWorkspace({
               </section>
             )}
 
+            {unplacedProperties.length > 0 && (
+              <div className="border-b border-ink-200 p-3">
+                <div className="banner-warn">
+                  <span>
+                    <strong>
+                      {unplacedProperties.length} propert{unplacedProperties.length === 1 ? 'y' : 'ies'} need map placement.
+                    </strong>{' '}
+                    Imported without reliable coordinates. Place each one, or add coordinates from its full record.
+                  </span>
+                </div>
+                <ul className="mt-2 space-y-1">
+                  {unplacedProperties.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between gap-2 text-xs text-ink-700">
+                      <span className="min-w-0 truncate">
+                        {propertyTitle(p)}
+                        <span className="ml-1 text-ink-400">{p.addressLine1 ?? 'no address'}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className={pendingPlacementFor === p.id ? 'btn-primary btn-sm shrink-0' : 'btn-secondary btn-sm shrink-0'}
+                        onClick={() => (pendingPlacementFor === p.id ? cancelPlacement() : startPlacingProperty(p.id))}
+                      >
+                        <MapPin size={12} /> {pendingPlacementFor === p.id ? 'Cancel' : 'Place on map'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {visible.length === 0 ? (
               <EmptyState
                 title={properties.length === 0 ? 'No properties in this market yet' : 'No properties match these filters'}
@@ -803,6 +885,7 @@ export function MarketWorkspace({
                             {p.addressLine1 ?? 'No address'}
                             {p.parcelCount > 0 && ` · ${p.parcelCount} parcel${p.parcelCount > 1 ? 's' : ''}`}
                             {p.needsParcelOutline && ' · needs outline'}
+                            {p.needsMapPlacement && ' · needs map placement'}
                           </div>
                           {rel && (
                             <div className={`text-[11px] ${rel.days < 0 ? 'font-medium text-red-700' : 'text-ink-500'}`}>
@@ -853,6 +936,7 @@ export function MarketWorkspace({
                 mapRef.current?.panTo({ lat: p.latitude, lng: p.longitude }, 17);
               }
             }}
+            onPlaceOnMap={() => startPlacingProperty(selectedId)}
           />
         )}
       </div>

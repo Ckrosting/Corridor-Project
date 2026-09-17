@@ -281,7 +281,14 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
                   <Field label="Longitude"><Value mono>{property.longitude?.toFixed(6)}</Value></Field>
                 </div>
                 {property.needsMapPlacement && (
-                  <div className="banner-warn"><span>This property has no coordinates and does not appear on the map.</span></div>
+                  <div className="banner-warn flex items-center justify-between gap-2">
+                    <span>This property has no coordinates and does not appear on the map.</span>
+                    {property.market && (
+                      <Link href={`/markets/${property.market.id}?place=${property.id}`} className="btn-secondary btn-sm shrink-0">
+                        Place on map
+                      </Link>
+                    )}
+                  </div>
                 )}
 
                 {property.parcels.length === 0 ? (

@@ -27,6 +27,7 @@ export interface PropertyFilters {
   includeSample?: boolean;
   includeArchived?: boolean;
   needsParcelOutline?: boolean;
+  needsMapPlacement?: boolean;
   /** `false` narrows to properties with no linked contact at all. */
   hasContact?: boolean;
   /** No non-status-change activity in the last N days, including never contacted. */
@@ -51,6 +52,7 @@ export function buildPropertyWhere(f: PropertyFilters): SQL[] {
 
   if (f.marketId) conds.push(eq(properties.marketId, f.marketId));
   if (f.needsParcelOutline) conds.push(eq(properties.needsParcelOutline, true));
+  if (f.needsMapPlacement) conds.push(eq(properties.needsMapPlacement, true));
 
   if (f.outreachStatusIds?.length) conds.push(inArray(properties.outreachStatusId, f.outreachStatusIds));
   if (f.listingStatuses?.length) {

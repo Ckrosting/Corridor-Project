@@ -45,6 +45,7 @@ export default async function PropertiesPage({
     pipeline: (one('pipeline') as PropertyFilters['pipeline']) ?? 'any',
     search: one('q'),
     needsParcelOutline: one('needsOutline') === 'true' ? true : undefined,
+    needsMapPlacement: one('needsPlacement') === 'true' ? true : undefined,
     includeArchived: one('includeArchived') === 'true',
     includeSample,
     sort: (one('sort') as PropertyFilters['sort']) ?? 'updated',

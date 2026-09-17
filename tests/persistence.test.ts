@@ -1074,4 +1074,16 @@ describe('property list filters', () => {
     const rows = ids(await listProperties({ marketId: market.id, overdueFollowUp: true, missingAskingPrice: true }));
     expect(rows).toEqual([both.id]);
   });
+
+  it('isolates properties that still need map placement', async () => {
+    const market = await createTestMarket('NeedsPlacement');
+    const unplaced = await createProperty({ marketId: market.id, name: `${TEST_PREFIX} Unplaced` }, actor);
+    const placed = await createProperty({
+      marketId: market.id, name: `${TEST_PREFIX} Placed`, latitude: 33.47, longitude: -82.02,
+    }, actor);
+
+    const rows = ids(await listProperties({ marketId: market.id, needsMapPlacement: true }));
+    expect(rows).toContain(unplaced.id);
+    expect(rows).not.toContain(placed.id);
+  });
 });

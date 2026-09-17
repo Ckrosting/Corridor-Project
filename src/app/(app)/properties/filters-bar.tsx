@@ -36,7 +36,7 @@ export function PropertyFiltersBar({
 
   const isOn = (key: string, value: string) => (params.get(key) ?? '').split(',').includes(value);
   const activeCount = [
-    'marketId', 'status', 'listing', 'type', 'pipeline', 'q', 'needsOutline',
+    'marketId', 'status', 'listing', 'type', 'pipeline', 'q', 'needsOutline', 'needsPlacement',
     'tag', 'hasContact', 'notContactedDays', 'missingPrice', 'overdue',
   ].filter((k) => params.get(k) && params.get(k) !== 'any').length;
 
@@ -93,6 +93,15 @@ export function PropertyFiltersBar({
             onChange={(e) => apply((p) => { if (e.target.checked) p.set('needsOutline', 'true'); else p.delete('needsOutline'); })}
           />
           Needs parcel outline
+        </label>
+
+        <label className="flex items-center gap-1.5 text-xs text-ink-600">
+          <input
+            type="checkbox"
+            checked={params.get('needsPlacement') === 'true'}
+            onChange={(e) => apply((p) => { if (e.target.checked) p.set('needsPlacement', 'true'); else p.delete('needsPlacement'); })}
+          />
+          Needs map placement
         </label>
 
         <select
