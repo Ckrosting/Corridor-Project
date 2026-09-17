@@ -37,6 +37,11 @@ export default async function PropertiesPage({
     outreachStatusIds: many('status'),
     listingStatuses: many('listing'),
     propertyTypes: many('type'),
+    tagIds: many('tag'),
+    hasContact: one('hasContact') === 'false' ? false : undefined,
+    notContactedInDays: one('notContactedDays') ? Number(one('notContactedDays')) : undefined,
+    missingAskingPrice: one('missingPrice') === 'true' ? true : undefined,
+    overdueFollowUp: one('overdue') === 'true' ? true : undefined,
     pipeline: (one('pipeline') as PropertyFilters['pipeline']) ?? 'any',
     search: one('q'),
     needsParcelOutline: one('needsOutline') === 'true' ? true : undefined,
@@ -74,6 +79,7 @@ export default async function PropertiesPage({
         markets={marketList}
         statuses={statusList.map((s) => ({ id: s.id, label: s.label, color: s.color }))}
         propertyTypes={propertyTypes}
+        tags={tagList.map((t) => ({ id: t.id, name: t.name }))}
       />
 
       <div className="scroll-thin flex-1 overflow-auto">

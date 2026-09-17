@@ -10,11 +10,12 @@ import { LISTING_STATUS_LABELS } from '@/lib/format';
  * bookmarked, shared with a colleague, and survives the browser back button.
  */
 export function PropertyFiltersBar({
-  markets, statuses, propertyTypes,
+  markets, statuses, propertyTypes, tags,
 }: {
   markets: Array<{ id: string; name: string }>;
   statuses: Array<{ id: string; label: string; color: string }>;
   propertyTypes: string[];
+  tags: Array<{ id: string; name: string }>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -34,8 +35,10 @@ export function PropertyFiltersBar({
   });
 
   const isOn = (key: string, value: string) => (params.get(key) ?? '').split(',').includes(value);
-  const activeCount = ['marketId', 'status', 'listing', 'type', 'pipeline', 'q', 'needsOutline']
-    .filter((k) => params.get(k) && params.get(k) !== 'any').length;
+  const activeCount = [
+    'marketId', 'status', 'listing', 'type', 'pipeline', 'q', 'needsOutline',
+    'tag', 'hasContact', 'notContactedDays', 'missingPrice', 'overdue',
+  ].filter((k) => params.get(k) && params.get(k) !== 'any').length;
 
   return (
     <div className="shrink-0 space-y-2 border-b border-ink-200 bg-white px-6 py-2.5">
@@ -92,6 +95,44 @@ export function PropertyFiltersBar({
           Needs parcel outline
         </label>
 
+        <select
+          className="input w-auto py-1 text-xs"
+          value={params.get('notContactedDays') ?? ''}
+          onChange={(e) => apply((p) => { if (e.target.value) p.set('notContactedDays', e.target.value); else p.delete('notContactedDays'); })}
+        >
+          <option value="">Contact recency: any</option>
+          <option value="30">Not contacted in 30+ days</option>
+          <option value="60">Not contacted in 60+ days</option>
+          <option value="90">Not contacted in 90+ days</option>
+        </select>
+
+        <label className="flex items-center gap-1.5 text-xs text-ink-600">
+          <input
+            type="checkbox"
+            checked={params.get('hasContact') === 'false'}
+            onChange={(e) => apply((p) => { if (e.target.checked) p.set('hasContact', 'false'); else p.delete('hasContact'); })}
+          />
+          No contact on file
+        </label>
+
+        <label className="flex items-center gap-1.5 text-xs text-ink-600">
+          <input
+            type="checkbox"
+            checked={params.get('missingPrice') === 'true'}
+            onChange={(e) => apply((p) => { if (e.target.checked) p.set('missingPrice', 'true'); else p.delete('missingPrice'); })}
+          />
+          Missing asking price
+        </label>
+
+        <label className="flex items-center gap-1.5 text-xs text-ink-600">
+          <input
+            type="checkbox"
+            checked={params.get('overdue') === 'true'}
+            onChange={(e) => apply((p) => { if (e.target.checked) p.set('overdue', 'true'); else p.delete('overdue'); })}
+          />
+          Overdue follow-up
+        </label>
+
         <label className="flex items-center gap-1.5 text-xs text-ink-600">
           <input
             type="checkbox"
@@ -124,6 +165,10 @@ export function PropertyFiltersBar({
           isOn={(v) => isOn('listing', v)} onToggle={(v) => toggleMulti('listing', v)} />
         <Chips label="Type" items={propertyTypes.map((t) => ({ value: t, label: t }))}
           isOn={(v) => isOn('type', v)} onToggle={(v) => toggleMulti('type', v)} />
+        {tags.length > 0 && (
+          <Chips label="Tags" items={tags.map((t) => ({ value: t.id, label: t.name }))}
+            isOn={(v) => isOn('tag', v)} onToggle={(v) => toggleMulti('tag', v)} />
+        )}
       </div>
     </div>
   );

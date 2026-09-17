@@ -5,6 +5,7 @@ import {
   activities, contacts, opportunities, opportunityProperties, outreachStatuses, properties,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
+import { lastActivityAtSql } from '@/lib/db-helpers';
 import { NotFoundError, ValidationError } from '@/lib/errors';
 import { recordAudit } from './audit';
 
@@ -241,8 +242,7 @@ const selectFollowUpRow = {
   outreachStatusLabel: outreachStatuses.label,
   outreachStatusColor: outreachStatuses.color,
   isSample: properties.isSample,
-  lastActivityAt: raw<string | null>`(select max(a.occurred_at)::text from activities a
-    where a.property_id = properties.id and a.type <> 'status_change')`,
+  lastActivityAt: raw<string | null>`${lastActivityAtSql}::text`,
 };
 
 /**

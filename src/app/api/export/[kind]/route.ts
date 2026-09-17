@@ -26,6 +26,10 @@ function propertyFiltersFrom(sp: URLSearchParams): PropertyFilters {
     pipeline: (sp.get('pipeline') as PropertyFilters['pipeline']) ?? 'any',
     search: sp.get('q') ?? undefined,
     needsParcelOutline: sp.get('needsOutline') === 'true' ? true : undefined,
+    hasContact: sp.get('hasContact') === 'false' ? false : undefined,
+    notContactedInDays: sp.get('notContactedDays') ? Number(sp.get('notContactedDays')) : undefined,
+    missingAskingPrice: sp.get('missingPrice') === 'true' ? true : undefined,
+    overdueFollowUp: sp.get('overdue') === 'true' ? true : undefined,
     includeArchived: sp.get('includeArchived') === 'true',
     includeSample: sp.get('includeSample') === 'true',
   };

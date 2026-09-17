@@ -8,7 +8,7 @@ import {
   propertyPriceHistory, propertyTags, tags, transactionStages,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
-import { sqlIn } from '@/lib/db-helpers';
+import { lastActivityAtSql, sqlIn } from '@/lib/db-helpers';
 import { NotFoundError, ValidationError } from '@/lib/errors';
 import { areaAcres, computeBBox, validateAreaGeometry } from '@/lib/geo/polygon';
 import { lookupCountyParcel, type CountyParcelMatch } from '@/lib/geo/county-parcels';
@@ -61,6 +61,23 @@ export function buildPropertyWhere(f: PropertyFilters): SQL[] {
   if (f.tagIds?.length) {
     conds.push(raw`exists (select 1 from property_tags pt
       where pt.property_id = properties.id and ${sqlIn('pt.tag_id', f.tagIds)})`);
+  }
+
+  if (f.hasContact !== undefined) {
+    const exists = raw`exists (select 1 from property_contacts pc where pc.property_id = properties.id)`;
+    conds.push(f.hasContact ? exists : raw`not ${exists}`);
+  }
+
+  if (f.notContactedInDays != null && Number.isFinite(f.notContactedInDays)) {
+    const cutoff = new Date(Date.now() - f.notContactedInDays * 86_400_000);
+    conds.push(raw`(${lastActivityAtSql} is null or ${lastActivityAtSql} < ${cutoff.toISOString()}::timestamptz)`);
+  }
+
+  if (f.missingAskingPrice) conds.push(isNull(properties.askingPrice));
+
+  if (f.overdueFollowUp) {
+    const today = new Date().toISOString().slice(0, 10);
+    conds.push(raw`${properties.nextFollowUpDate} is not null and ${properties.nextFollowUpDate} < ${today}`);
   }
 
   if (f.pipeline === 'in_pipeline' || f.pipeline === 'not_in_pipeline') {
@@ -174,7 +191,7 @@ export async function getPropertyDetail(id: string) {
       p: properties,
       outreachStatus: { id: outreachStatuses.id, label: outreachStatuses.label, color: outreachStatuses.color },
       market: { id: markets.id, name: markets.name },
-      ownerEntity: { id: ownerEntities.id, name: ownerEntities.name, entityType: ownerEntities.entityType, mailingAddress: ownerEntities.mailingAddress, notes: ownerEntities.notes },
+      ownerEntity: { id: ownerEntities.id, name: ownerEntities.name, entityType: ownerEntities.entityType, mailingAddress: ownerEntities.mailingAddress, notes: ownerEntities.notes, version: ownerEntities.version },
     })
     .from(properties)
     .leftJoin(outreachStatuses, eq(outreachStatuses.id, properties.outreachStatusId))
