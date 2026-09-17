@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Check, Pencil, TriangleAlert, X } from 'lucide-react';
 import { LISTING_STATUS_LABELS } from '@/lib/format';
 import { Spinner } from '@/components/ui/primitives';
+import { OwnerEntityPicker } from './owner-entity-fields';
 
 interface EditableProperty {
   id: string;
@@ -34,6 +35,7 @@ interface EditableProperty {
   nextFollowUpDate: string | null;
   researchNotes: string | null;
   outreachStatus: { id: string; label: string; color: string } | null;
+  ownerEntity: { id: string; name: string } | null;
   tags: Array<{ id: string; name: string; color: string }>;
   customFields: Array<{
     def: { id: string; key: string; label: string; type: string; options: string[] | null; helpText: string | null };
@@ -95,6 +97,9 @@ export function PropertyEditor({
     outreachStatusId: property.outreachStatus?.id ?? '',
   }));
 
+  const [owner, setOwner] = useState<{ id: string; name: string } | null>(
+    property.ownerEntity ? { id: property.ownerEntity.id, name: property.ownerEntity.name } : null,
+  );
   const [tagIds, setTagIds] = useState<string[]>(property.tags.map((t) => t.id));
   const [customValues, setCustomValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(property.customFields.map(({ def, value }) => [
@@ -144,6 +149,7 @@ export function PropertyEditor({
           nextFollowUpDate: blank(form.nextFollowUpDate),
           researchNotes: blank(form.researchNotes),
           outreachStatusId: form.outreachStatusId || null,
+          ownerEntityId: owner?.id ?? null,
           tagIds,
           customFields: customValues,
         }),
@@ -239,6 +245,7 @@ export function PropertyEditor({
           <Input label="County" value={form.county} onChange={set('county')} />
           <Input label="Latitude" value={form.latitude} onChange={set('latitude')} inputMode="decimal" />
           <Input label="Longitude" value={form.longitude} onChange={set('longitude')} inputMode="decimal" />
+          <OwnerEntityPicker value={owner?.id ?? null} label={owner?.name ?? null} onChange={setOwner} />
         </FieldGrid>
 
         <FieldGrid title="Physical">

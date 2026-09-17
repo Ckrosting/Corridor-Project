@@ -19,6 +19,7 @@ import {
   StatusChip, Value,
 } from '@/components/ui/primitives';
 import { PropertyEditor } from '@/components/workspace/property-editor';
+import { OwnerEntityCard } from '@/components/workspace/owner-entity-fields';
 import { AttachmentPanel } from '@/components/workspace/attachment-panel';
 
 export const dynamic = 'force-dynamic';
@@ -237,18 +238,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
             <section className="card">
               <div className="card-header"><h2 className="card-title">Contacts</h2></div>
               <div className="space-y-3 p-4">
-                {property.ownerEntity && (
-                  <div className="rounded-md border border-ink-200 bg-ink-50 p-2.5">
-                    <div className="section-label mb-1">Owner legal entity</div>
-                    <div className="text-sm font-medium text-ink-900">{property.ownerEntity.name}</div>
-                    {property.ownerEntity.entityType && (
-                      <div className="text-xs text-ink-500">{property.ownerEntity.entityType}</div>
-                    )}
-                    {property.ownerEntity.mailingAddress && (
-                      <div className="mt-1 text-xs text-ink-600">{property.ownerEntity.mailingAddress}</div>
-                    )}
-                  </div>
-                )}
+                {property.ownerEntity && <OwnerEntityCard entity={property.ownerEntity} />}
 
                 {property.contacts.length === 0 ? (
                   <EmptyState title="No contacts" body="Attach the owner or broker so their details travel with this record." />

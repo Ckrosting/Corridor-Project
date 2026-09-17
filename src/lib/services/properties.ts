@@ -27,6 +27,12 @@ export interface PropertyFilters {
   includeSample?: boolean;
   includeArchived?: boolean;
   needsParcelOutline?: boolean;
+  /** `false` narrows to properties with no linked contact at all. */
+  hasContact?: boolean;
+  /** No non-status-change activity in the last N days, including never contacted. */
+  notContactedInDays?: number;
+  missingAskingPrice?: boolean;
+  overdueFollowUp?: boolean;
   /** Map viewport, to avoid shipping the whole portfolio to the browser. */
   bbox?: { minLat: number; maxLat: number; minLng: number; maxLng: number };
   limit?: number;

@@ -18,6 +18,7 @@ import { streetViewUrl } from '@/lib/geo/street-view';
 import { CallLogger, type OutreachStatusOption } from './call-logger';
 import { PromoteDialog } from './promote-dialog';
 import { PropertyEditor } from './property-editor';
+import { OwnerEntityCard } from './owner-entity-fields';
 
 /** Shape returned by GET /api/properties/[id]. */
 interface PropertyDetailData {
@@ -52,7 +53,7 @@ interface PropertyDetailData {
   isSample: boolean;
   version: number;
   outreachStatus: { id: string; label: string; color: string } | null;
-  ownerEntity: { id: string; name: string; entityType: string | null; mailingAddress: string | null } | null;
+  ownerEntity: { id: string; name: string; entityType: string | null; mailingAddress: string | null; notes: string | null; version: number } | null;
   parcels: Array<{ id: string; parcelIdText: string | null; label: string | null; acreage: string | null; geometry: unknown }>;
   contacts: Array<{
     contact: {
@@ -700,14 +701,12 @@ export function PropertyPanel({
         {/* -------------------------------------------------------- Contacts */}
         {tab === 'contacts' && (
           <div className="space-y-3 p-3">
-            {data.ownerEntity && (
-              <div className="rounded-md border border-ink-200 bg-ink-50 p-2.5">
-                <div className="section-label mb-1">Owner legal entity</div>
-                <div className="text-sm font-medium text-ink-900">{data.ownerEntity.name}</div>
-                {data.ownerEntity.entityType && <div className="text-xs text-ink-500">{data.ownerEntity.entityType}</div>}
-                {data.ownerEntity.mailingAddress && <div className="mt-1 text-xs text-ink-600">{data.ownerEntity.mailingAddress}</div>}
-                <p className="field-hint">An entity is not a person. The people who represent it are listed below.</p>
-              </div>
+            {data.ownerEntity ? (
+              <OwnerEntityCard entity={data.ownerEntity} onSaved={() => { void load(); onChanged(); }} />
+            ) : (
+              <p className="field-hint">
+                No owner entity linked. Set one in the Overview tab&apos;s property editor.
+              </p>
             )}
 
             {contactError && <div className="banner-error" role="alert">{contactError}</div>}

@@ -251,6 +251,11 @@ export const ownerEntityCreateSchema = z.object({
   source: optionalText(240),
 });
 
+export const ownerEntityUpdateSchema = ownerEntityCreateSchema.partial().extend({
+  version: z.number().int().positive(),
+  markVerified: z.boolean().optional(),
+});
+
 export const propertyContactLinkSchema = z.object({
   contactId: uuid,
   relationship: contactRole.default('other'),
