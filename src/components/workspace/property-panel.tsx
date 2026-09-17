@@ -8,7 +8,7 @@ import {
 import {
   ACTIVITY_TYPE_LABELS, CALL_OUTCOME_LABELS, CONTACT_ROLE_LABELS, LISTING_STATUS_LABELS,
   capRateView, formatAcres, formatAddress, formatCapRate, formatDate, formatDateTime,
-  formatMoney, formatPercent, formatSqft, propertyTitle, relativeDays, UNKNOWN,
+  formatMoney, propertyTitle, relativeDays, UNKNOWN,
 } from '@/lib/format';
 import {
   ApproximateBoundaryNote, EmptyState, Field, SampleBadge, SectionHeading,
@@ -17,6 +17,7 @@ import {
 import { streetViewUrl } from '@/lib/geo/street-view';
 import { CallLogger, type OutreachStatusOption } from './call-logger';
 import { PromoteDialog } from './promote-dialog';
+import { PropertyEditor } from './property-editor';
 
 /** Shape returned by GET /api/properties/[id]. */
 interface PropertyDetailData {
@@ -33,6 +34,7 @@ interface PropertyDetailData {
   landAcreage: string | null;
   buildingSqft: number | null;
   occupancyPercent: string | null;
+  yearBuilt: number | null;
   tenantInfo: string | null;
   askingPrice: string | null;
   targetPurchasePrice: string | null;
@@ -65,6 +67,10 @@ interface PropertyDetailData {
   }>;
   listingSources: Array<{ id: string; url: string; sourceName: string | null }>;
   opportunities: Array<{ id: string; name: string; state: string; stageLabel: string | null; stageColor: string | null; promotedAt: string; promotionReason: string }>;
+  customFields: Array<{
+    def: { id: string; key: string; label: string; type: string; options: string[] | null; helpText: string | null };
+    value: unknown;
+  }>;
 }
 
 type Tab = 'overview' | 'calls' | 'contacts' | 'financial' | 'parcels';
@@ -76,10 +82,12 @@ type Tab = 'overview' | 'calls' | 'contacts' | 'financial' | 'parcels';
  * does not lose their place while working a market.
  */
 export function PropertyPanel({
-  propertyId, statuses, isAdmin, onClose, onChanged, onZoomToProperty,
+  propertyId, statuses, tags, propertyTypes, isAdmin, onClose, onChanged, onZoomToProperty,
 }: {
   propertyId: string;
   statuses: OutreachStatusOption[];
+  tags: Array<{ id: string; name: string; color: string }>;
+  propertyTypes: string[];
   isAdmin: boolean;
   onClose(): void;
   onChanged(): void;
@@ -301,24 +309,15 @@ export function PropertyPanel({
               </button>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Property type"><Value>{data.propertyType}</Value></Field>
-              <Field label="County"><Value>{data.county}</Value></Field>
-              <Field label="Land"><Value mono>{formatAcres(data.landAcreage)}</Value></Field>
-              <Field label="Building"><Value mono>{formatSqft(data.buildingSqft)}</Value></Field>
-              <Field label="Occupancy"><Value mono>{formatPercent(data.occupancyPercent)}</Value></Field>
-              <Field label="Owner entity"><Value>{data.ownerEntity?.name}</Value></Field>
-            </div>
+            <Field label="Owner entity"><Value>{data.ownerEntity?.name}</Value></Field>
 
-            {data.tenantInfo && (
-              <Field label="Tenants"><p className="whitespace-pre-wrap">{data.tenantInfo}</p></Field>
-            )}
-
-            {data.researchNotes && (
-              <Field label="Research notes">
-                <p className="whitespace-pre-wrap text-ink-700">{data.researchNotes}</p>
-              </Field>
-            )}
+            <PropertyEditor
+              property={data}
+              statuses={statuses}
+              tags={tags}
+              propertyTypes={propertyTypes}
+              onSaved={() => { void load(); onChanged(); }}
+            />
 
             <div className="grid grid-cols-2 gap-3 border-t border-ink-100 pt-3">
               <Field label="First discovered"><Value>{formatDate(data.firstDiscoveredAt)}</Value></Field>

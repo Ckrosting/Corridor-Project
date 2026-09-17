@@ -644,6 +644,8 @@ export function MarketWorkspace({
             key={selectedId}
             propertyId={selectedId}
             statuses={statuses}
+            tags={tags}
+            propertyTypes={propertyTypes}
             isAdmin={isAdmin}
             onClose={() => setSelectedId(null)}
             onChanged={() => router.refresh()}

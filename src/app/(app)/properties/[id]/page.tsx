@@ -18,7 +18,7 @@ import {
   ApproximateBoundaryNote, EmptyState, Field, SampleBadge, SectionHeading,
   StatusChip, Value,
 } from '@/components/ui/primitives';
-import { PropertyEditor } from './property-editor';
+import { PropertyEditor } from '@/components/workspace/property-editor';
 import { AttachmentPanel } from '@/components/workspace/attachment-panel';
 
 export const dynamic = 'force-dynamic';

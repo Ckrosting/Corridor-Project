@@ -49,12 +49,16 @@ interface EditableProperty {
  * rather than letting one person's work quietly replace another's.
  */
 export function PropertyEditor({
-  property, statuses, tags, propertyTypes,
+  property, statuses, tags, propertyTypes, onSaved,
 }: {
   property: EditableProperty;
   statuses: Array<{ id: string; label: string; color: string }>;
   tags: Array<{ id: string; name: string; color: string }>;
   propertyTypes: string[];
+  /** Called after a successful save, in addition to refreshing the route. A
+   *  caller that keeps its own client-fetched copy of the property (the map
+   *  panel) needs this to know to re-fetch; a server-rendered page does not. */
+  onSaved?(): void;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -157,6 +161,7 @@ export function PropertyEditor({
       setEditing(false);
       setTimeout(() => setSaved(false), 2500);
       router.refresh();
+      onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save.');
     } finally {
