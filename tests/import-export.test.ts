@@ -13,7 +13,7 @@ import { createCustomField } from '@/lib/services/taxonomy';
 import { parseCandidateCsv, parseCandidateXlsx } from '@/lib/services/candidate-csv';
 import { readXlsxRows } from '@/lib/xlsx';
 import type { Actor } from '@/lib/auth/guards';
-import { cleanupTestData, createTestMarket, ensureBaseline, testActor, TEST_PREFIX } from './helpers';
+import { cleanupTestData, createTestMarket, ensureBaseline, statusByKey, testActor, TEST_PREFIX } from './helpers';
 
 let actor: Actor;
 
@@ -619,5 +619,24 @@ describe('property import manual column mapping', () => {
     expect(row!.landAcreage).toBe('2.5000');
     expect(row!.buildingSqft).toBe(15000);
     expect(row!.needsMapPlacement).toBe(false);
+  });
+
+  it('marks an imported property for sale and ready to contact by default', async () => {
+    const market = await createTestMarket('PropImportDefaults');
+    const csv = [
+      PROPERTY_HEADER,
+      `${TEST_PREFIX} Default Status Property,4 Main St,Augusta,GA,30909`,
+    ].join('\r\n');
+
+    const parsed = parsePropertyImportFile(csv);
+    const rows = await validatePropertyRows(parsed, parsed.suggestedMapping, market.id);
+    const batch = await createPropertyImportBatch('defaults.csv', parsed.suggestedMapping, market.id, rows, actor);
+    await commitPropertyImport(batch.id, {}, actor);
+
+    const readyStatus = await statusByKey('ready_to_contact');
+    const [row] = await db.select().from(properties)
+      .where(eq(properties.name, `${TEST_PREFIX} Default Status Property`)).limit(1);
+    expect(row!.listingStatus).toBe('for_sale');
+    expect(row!.outreachStatusId).toBe(readyStatus.id);
   });
 });

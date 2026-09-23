@@ -2,7 +2,7 @@ import '@/lib/server-guard';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import {
-  contacts, importBatches, importRows, markets, properties, propertyContacts,
+  contacts, importBatches, importRows, markets, outreachStatuses, properties, propertyContacts,
 } from '@/db/schema';
 import type { Actor } from '@/lib/auth/guards';
 import { normaliseHeader, parseCsv, unescapeCell } from '@/lib/csv';
@@ -338,6 +338,12 @@ export async function commitPropertyImport(
   const rows = await db.select().from(importRows).where(eq(importRows.batchId, batchId));
   const [market] = await db.select({ name: markets.name }).from(markets).where(eq(markets.id, marketId)).limit(1);
 
+  // Imported properties are research the team already has, not a cold list -
+  // so they start ready for outreach and marked for-sale, rather than in the
+  // "needs research" / "unknown" state a brand-new discovery candidate gets.
+  const [readyStatus] = await db.select({ id: outreachStatuses.id })
+    .from(outreachStatuses).where(eq(outreachStatuses.key, 'ready_to_contact')).limit(1);
+
   let created = 0;
   let skipped = 0;
   let parcelsMatched = 0;
@@ -376,7 +382,8 @@ export async function commitPropertyImport(
       askingPrice: mapped.askingPrice ?? null,
       noi: mapped.noi ?? null,
       capRateReported: mapped.capRateReported ?? null,
-      listingStatus: 'unknown',
+      listingStatus: 'for_sale',
+      outreachStatusId: readyStatus?.id ?? null,
       researchNotes: noteLines.join(' '),
     }, actor);
 

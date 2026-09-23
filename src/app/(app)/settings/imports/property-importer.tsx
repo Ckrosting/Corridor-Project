@@ -184,8 +184,9 @@ export function PropertyImporter({
             {!!result.parcelsMatched && (
               <> {result.parcelsMatched} matched to a real parcel boundary from the county&rsquo;s own GIS records.</>
             )}
-            {' '}Any property without coordinates is flagged &ldquo;needs map placement&rdquo;, ready to place and
-            work from a market.
+            {' '}Each is marked <strong>for sale</strong> and <strong>ready to contact</strong>, since imported
+            research is treated as already qualified for outreach. Any property without coordinates is
+            flagged &ldquo;needs map placement&rdquo;, ready to place and work from a market.
           </span>
         </div>
         <button type="button" className="btn-secondary btn-sm" onClick={() => setResult(null)}>
