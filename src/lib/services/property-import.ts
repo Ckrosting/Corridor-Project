@@ -29,6 +29,7 @@ export interface PropertyImportRow {
   city: string | null;
   state: string | null;
   postalCode: string | null;
+  county: string | null;
   propertyType: string | null;
   lastSaleDate: string | null;
   lastSalePrice: string | null;
@@ -38,6 +39,16 @@ export interface PropertyImportRow {
   contactEmail: string | null;
   /** County parcel ID (PIN/REID/etc) - if the market has a verified county GIS feed configured, this is looked up directly for an exact parcel match. */
   parcelId: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  landAcreage: string | null;
+  buildingSqft: number | null;
+  occupancyPercent: string | null;
+  yearBuilt: number | null;
+  tenantInfo: string | null;
+  askingPrice: string | null;
+  noi: string | null;
+  capRateReported: string | null;
 }
 
 export const PROPERTY_COLUMN_ALIASES: Record<keyof PropertyImportRow, string[]> = {
@@ -46,6 +57,7 @@ export const PROPERTY_COLUMN_ALIASES: Record<keyof PropertyImportRow, string[]> 
   city: ['city'],
   state: ['state', 'st'],
   postalCode: ['postal_code', 'zip', 'zip_code'],
+  county: ['county'],
   propertyType: ['property_type', 'type', 'use_type'],
   lastSaleDate: ['last_sale', 'last_sale_date', 'sale_date'],
   lastSalePrice: ['sale_price', 'last_sale_price', 'price'],
@@ -53,6 +65,16 @@ export const PROPERTY_COLUMN_ALIASES: Record<keyof PropertyImportRow, string[]> 
   contactRaw: ['contact', 'contact_phone', 'phone', 'contact_info', 'contact_name'],
   contactEmail: ['email', 'contact_email'],
   parcelId: ['parcel_id', 'pin', 'parcel_id_pin', 'reid', 'parcel_number'],
+  latitude: ['latitude', 'lat', 'y'],
+  longitude: ['longitude', 'lng', 'lon', 'long', 'x'],
+  landAcreage: ['land_acreage', 'acreage', 'acres', 'lot_size_acres'],
+  buildingSqft: ['building_sqft', 'sqft', 'square_feet', 'building_size', 'gla'],
+  occupancyPercent: ['occupancy', 'occupancy_percent', 'occupancy_rate'],
+  yearBuilt: ['year_built', 'built', 'yr_built'],
+  tenantInfo: ['tenant_info', 'tenants', 'tenant_information'],
+  askingPrice: ['asking_price', 'list_price', 'listing_price'],
+  noi: ['noi', 'net_operating_income'],
+  capRateReported: ['cap_rate', 'cap_rate_reported', 'capitalization_rate'],
 };
 
 export const PROPERTY_REQUIRED_FIELDS: Array<keyof PropertyImportRow> = [];
@@ -110,6 +132,21 @@ const parseDate = (s: string): string | null => {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 };
 
+const parseDecimal = (s: string): string | null => {
+  const n = Number(s.replace(/[,\s%]/g, ''));
+  return Number.isFinite(n) ? n.toString() : null;
+};
+
+const parseInt10 = (s: string): number | null => {
+  const n = Number(s.replace(/[,\s]/g, ''));
+  return Number.isFinite(n) ? Math.round(n) : null;
+};
+
+const parseCoord = (s: string, min: number, max: number): number | null => {
+  const n = Number(s);
+  return Number.isFinite(n) && n >= min && n <= max ? n : null;
+};
+
 export async function validatePropertyRows(
   parsed: ParsedPropertyImport,
   mapping: Record<string, string>,
@@ -150,17 +187,57 @@ export async function validatePropertyRows(
     const lastSaleDate = lastSaleDateRaw ? parseDate(lastSaleDateRaw) : null;
     if (lastSaleDateRaw && lastSaleDate === null) warnings.push(`"${lastSaleDateRaw}" is not a recognisable date; it will be left blank.`);
 
+    const latitudeRaw = value('latitude');
+    const longitudeRaw = value('longitude');
+    const latitude = latitudeRaw ? parseCoord(latitudeRaw, -90, 90) : null;
+    const longitude = longitudeRaw ? parseCoord(longitudeRaw, -180, 180) : null;
+    if (latitudeRaw && latitude === null) warnings.push(`"${latitudeRaw}" is not a recognisable latitude; it will be left blank.`);
+    if (longitudeRaw && longitude === null) warnings.push(`"${longitudeRaw}" is not a recognisable longitude; it will be left blank.`);
+
+    const landAcreageRaw = value('landAcreage');
+    const landAcreage = landAcreageRaw ? parseDecimal(landAcreageRaw) : null;
+    if (landAcreageRaw && landAcreage === null) warnings.push(`"${landAcreageRaw}" is not a recognisable acreage; it will be left blank.`);
+
+    const buildingSqftRaw = value('buildingSqft');
+    const buildingSqft = buildingSqftRaw ? parseInt10(buildingSqftRaw) : null;
+    if (buildingSqftRaw && buildingSqft === null) warnings.push(`"${buildingSqftRaw}" is not a recognisable square footage; it will be left blank.`);
+
+    const occupancyPercentRaw = value('occupancyPercent');
+    const occupancyPercent = occupancyPercentRaw ? parseDecimal(occupancyPercentRaw) : null;
+    if (occupancyPercentRaw && occupancyPercent === null) warnings.push(`"${occupancyPercentRaw}" is not a recognisable occupancy; it will be left blank.`);
+
+    const yearBuiltRaw = value('yearBuilt');
+    const yearBuilt = yearBuiltRaw ? parseInt10(yearBuiltRaw) : null;
+    if (yearBuiltRaw && yearBuilt === null) warnings.push(`"${yearBuiltRaw}" is not a recognisable year; it will be left blank.`);
+
+    const askingPriceRaw = value('askingPrice');
+    const askingPrice = askingPriceRaw ? parseMoney(askingPriceRaw) : null;
+    if (askingPriceRaw && askingPrice === null) warnings.push(`"${askingPriceRaw}" is not a recognisable asking price; it will be left blank.`);
+
+    const noiRaw = value('noi');
+    const noi = noiRaw ? parseMoney(noiRaw) : null;
+    if (noiRaw && noi === null) warnings.push(`"${noiRaw}" is not a recognisable NOI; it will be left blank.`);
+
+    const capRateReportedRaw = value('capRateReported');
+    const capRateReported = capRateReportedRaw ? parseDecimal(capRateReportedRaw) : null;
+    if (capRateReportedRaw && capRateReported === null) warnings.push(`"${capRateReportedRaw}" is not a recognisable cap rate; it will be left blank.`);
+
     const mapped: Partial<PropertyImportRow> = {
       name, addressLine1,
       city: value('city') || null,
       state: value('state') || null,
       postalCode: value('postalCode') || null,
+      county: value('county') || null,
       propertyType: value('propertyType') || null,
       lastSaleDate, lastSalePrice,
       ownerName: value('ownerName') || null,
       contactRaw: value('contactRaw') || null,
       contactEmail: value('contactEmail') || null,
       parcelId: value('parcelId') || null,
+      latitude, longitude,
+      landAcreage, buildingSqft, occupancyPercent, yearBuilt,
+      tenantInfo: value('tenantInfo') || null,
+      askingPrice, noi, capRateReported,
     };
 
     const customFields: Record<string, string> = {};
@@ -286,7 +363,19 @@ export async function commitPropertyImport(
       city: mapped.city ?? null,
       state: mapped.state ?? null,
       postalCode: mapped.postalCode ?? null,
+      county: mapped.county ?? null,
       propertyType: mapped.propertyType ?? null,
+      latitude: mapped.latitude ?? null,
+      longitude: mapped.longitude ?? null,
+      ...(mapped.latitude != null && mapped.longitude != null ? { locationSource: 'imported' } : {}),
+      landAcreage: mapped.landAcreage ?? null,
+      buildingSqft: mapped.buildingSqft ?? null,
+      occupancyPercent: mapped.occupancyPercent ?? null,
+      yearBuilt: mapped.yearBuilt ?? null,
+      tenantInfo: mapped.tenantInfo ?? null,
+      askingPrice: mapped.askingPrice ?? null,
+      noi: mapped.noi ?? null,
+      capRateReported: mapped.capRateReported ?? null,
       listingStatus: 'unknown',
       researchNotes: noteLines.join(' '),
     }, actor);

@@ -577,4 +577,47 @@ describe('property import manual column mapping', () => {
       .where(eq(customFieldValues.propertyId, row!.id));
     expect(value!.value).toBe('C-2 commercial');
   });
+
+  it('auto-maps and stores property detail columns: coordinates, acreage, sqft and financials', async () => {
+    const market = await createTestMarket('PropImportDetail');
+    const csv = [
+      `${PROPERTY_HEADER},County,Latitude,Longitude,Acres,Sqft,Occupancy,Year Built,Asking Price,NOI,Cap Rate`,
+      `${TEST_PREFIX} Detail Property,3 Main St,Augusta,GA,30909,Richmond,33.4735,-82.0812,2.5,15000,92,1998,2500000,175000,7`,
+    ].join('\r\n');
+
+    const parsed = parsePropertyImportFile(csv);
+    // These are all recognised aliases, so they should already be auto-mapped.
+    for (const field of [
+      'county', 'latitude', 'longitude', 'landAcreage', 'buildingSqft',
+      'occupancyPercent', 'yearBuilt', 'askingPrice', 'noi', 'capRateReported',
+    ]) {
+      expect(Object.values(parsed.suggestedMapping)).toContain(field);
+    }
+
+    const rows = await validatePropertyRows(parsed, parsed.suggestedMapping, market.id);
+    expect(rows[0]!.mapped).toMatchObject({
+      county: 'Richmond',
+      latitude: 33.4735,
+      longitude: -82.0812,
+      landAcreage: '2.5',
+      buildingSqft: 15000,
+      occupancyPercent: '92',
+      yearBuilt: 1998,
+      askingPrice: '2500000.00',
+      noi: '175000.00',
+      capRateReported: '7',
+    });
+
+    const batch = await createPropertyImportBatch('detail.csv', parsed.suggestedMapping, market.id, rows, actor);
+    await commitPropertyImport(batch.id, {}, actor);
+
+    const [row] = await db.select().from(properties)
+      .where(eq(properties.name, `${TEST_PREFIX} Detail Property`)).limit(1);
+    expect(row!.county).toBe('Richmond');
+    expect(row!.latitude).toBeCloseTo(33.4735, 4);
+    expect(row!.longitude).toBeCloseTo(-82.0812, 4);
+    expect(row!.landAcreage).toBe('2.5000');
+    expect(row!.buildingSqft).toBe(15000);
+    expect(row!.needsMapPlacement).toBe(false);
+  });
 });
