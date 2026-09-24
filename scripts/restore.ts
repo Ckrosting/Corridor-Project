@@ -30,6 +30,32 @@ const TABLE_ORDER = [
   'import_rows', 'audit_log',
 ] as const;
 
+/**
+ * postgres.js infers a bind parameter's wire type from the JS value alone: a
+ * plain boolean or number is sent as SQL boolean/numeric, not jsonb, and
+ * Postgres has no implicit cast from those into a jsonb column (unlike a JS
+ * object/array, which the driver already serialises as json/jsonb). Every
+ * jsonb column in the schema needs its value wrapped with `sql.json(...)` so
+ * a non-object value (a bare `false`, `500`, or a jsonb array column) still
+ * round-trips correctly.
+ */
+const JSONB_COLUMNS: Partial<Record<(typeof TABLE_ORDER)[number], string[]>> = {
+  app_settings: ['value'],
+  audit_log: ['changes'],
+  activities: ['metadata'],
+  saved_views: ['filters', 'is_shared'],
+  scans: ['market_ids', 'coverage_notes'],
+  scan_targets: ['sources_searched', 'coverage_notes'],
+  discovery_results: ['field_sources', 'needs_verification', 'sources'],
+  discovery_suppressions: ['proposed_changes'],
+  import_batches: ['column_mapping'],
+  import_rows: ['raw', 'mapped', 'errors', 'warnings'],
+  jobs: ['payload', 'result'],
+  property_parcels: ['geometry'],
+  custom_field_defs: ['options'],
+  custom_field_values: ['value'],
+};
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -145,9 +171,15 @@ async function main() {
         batch = [];
       };
 
+      const jsonbColumns = JSONB_COLUMNS[table] ?? [];
+
       for await (const line of reader) {
         if (!line.trim()) continue;
-        batch.push(JSON.parse(line) as Record<string, unknown>);
+        const row = JSON.parse(line) as Record<string, unknown>;
+        for (const col of jsonbColumns) {
+          if (row[col] !== null && row[col] !== undefined) row[col] = sql.json(row[col] as never);
+        }
+        batch.push(row);
         if (batch.length >= 250) await flush();
       }
       await flush();
