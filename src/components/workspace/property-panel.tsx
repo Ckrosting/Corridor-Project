@@ -55,7 +55,7 @@ interface PropertyDetailData {
   version: number;
   outreachStatus: { id: string; label: string; color: string } | null;
   ownerEntity: { id: string; name: string; entityType: string | null; mailingAddress: string | null; notes: string | null; version: number } | null;
-  parcels: Array<{ id: string; parcelIdText: string | null; label: string | null; acreage: string | null; geometry: unknown }>;
+  parcels: Array<{ id: string; parcelIdText: string | null; label: string | null; acreage: string | null; geometry: unknown; geometrySource: string | null }>;
   contacts: Array<{
     contact: {
       id: string; version: number; name: string; company: string | null; title: string | null;
@@ -167,6 +167,10 @@ export function PropertyPanel({
   const [contactBusy, setContactBusy] = useState(false);
   const [contactError, setContactError] = useState<string | null>(null);
 
+  const [confirmingRemoveParcelId, setConfirmingRemoveParcelId] = useState<string | null>(null);
+  const [parcelBusy, setParcelBusy] = useState(false);
+  const [parcelError, setParcelError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -197,6 +201,23 @@ export function PropertyPanel({
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : 'Could not delete this property.');
       setDeleting(false);
+    }
+  }
+
+  async function removeParcel(parcelId: string) {
+    setParcelBusy(true);
+    setParcelError(null);
+    try {
+      const res = await fetch(`/api/parcels/${parcelId}`, { method: 'DELETE' });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not remove this parcel.');
+      setConfirmingRemoveParcelId(null);
+      await load();
+      onChanged();
+    } catch (err) {
+      setParcelError(err instanceof Error ? err.message : 'Could not remove this parcel.');
+    } finally {
+      setParcelBusy(false);
     }
   }
 
@@ -918,6 +939,7 @@ export function PropertyPanel({
               />
             ) : (
               <>
+                {parcelError && <div className="banner-error" role="alert">{parcelError}</div>}
                 {data.parcels.map((p) => (
                   <div key={p.id} className="rounded-md border border-ink-200 p-2.5">
                     <div className="flex items-center justify-between gap-2">
@@ -927,9 +949,47 @@ export function PropertyPanel({
                     <div className="mt-0.5 text-xs text-ink-600">
                       Parcel ID: <Value>{p.parcelIdText}</Value>
                     </div>
+                    {p.geometrySource === 'county_gis' && (
+                      <div className="mt-1 text-[11px] text-ink-500">
+                        From the county&rsquo;s own GIS records — dragging this property&rsquo;s pin never
+                        replaces it automatically.
+                      </div>
+                    )}
                     {!p.geometry && (
                       <div className="mt-1 text-[11px] text-amber-700">No boundary drawn for this parcel yet.</div>
                     )}
+                    <div className="mt-2">
+                      {confirmingRemoveParcelId === p.id ? (
+                        <div className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2 py-1">
+                          <span className="text-[11px] text-red-700">
+                            Remove this outline? {p.geometrySource === 'county_gis'
+                              ? 'It stops describing this property until a new one is matched or drawn.'
+                              : 'You can draw or re-match a new one afterward.'}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded bg-red-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                            disabled={parcelBusy}
+                            onClick={() => void removeParcel(p.id)}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button" className="rounded px-2 py-0.5 text-[11px] text-ink-600 hover:bg-ink-100"
+                            disabled={parcelBusy} onClick={() => setConfirmingRemoveParcelId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button" className="btn-ghost btn-sm text-red-600 hover:bg-red-50"
+                          onClick={() => { setConfirmingRemoveParcelId(p.id); setParcelError(null); }}
+                        >
+                          <Trash2 size={12} /> Remove this outline
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
                 <ApproximateBoundaryNote />
