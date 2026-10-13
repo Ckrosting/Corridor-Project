@@ -25,7 +25,7 @@ const KIND_OPTIONS = [
 ] as const;
 
 /** Kept in sync with the server allowlist in src/lib/storage/index.ts for a fast client-side hint only - the server re-validates every byte. */
-const ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.csv,.txt,.doc,.docx,.xls,.xlsx';
+const ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.heic,.csv,.txt,.doc,.docx,.xls,.xlsx';
 
 export function AttachmentPanel({
   propertyId, attachments, isAdmin,
@@ -125,7 +125,7 @@ export function AttachmentPanel({
                 browse
               </button>
             </p>
-            <p className="text-[11px] text-ink-400">PDF, images, Office documents, CSV or text</p>
+            <p className="text-[11px] text-ink-400">Images, Office documents, CSV or text</p>
           </>
         )}
         <input

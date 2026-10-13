@@ -35,6 +35,10 @@ export const POST = route(async (req: Request) => {
     .where(eq(properties.id, propertyId)).limit(1);
   if (!property) throw new NotFoundError('Property');
 
+  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    throw new AppError(415, 'PDF attachments are not stored. Upload an image or another document type.', 'pdf_not_stored');
+  }
+
   const bytes = Buffer.from(await file.arrayBuffer());
   // Type, extension, magic-number and size checks before anything is written.
   assertUploadAllowed(file.name, file.type || 'application/octet-stream', bytes);
